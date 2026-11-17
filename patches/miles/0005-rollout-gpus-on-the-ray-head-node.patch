@@ -1,0 +1,50 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+Date: Thu, 15 Oct 2026 22:05:00 +0900
+Subject: [PATCH] prl: rollout GPUs on the Ray head node
+ (PRL_ROLLOUT_ON_HEAD=1)
+
+---
+diff --git a/miles/ray/placement_group.py b/miles/ray/placement_group.py
+--- a/miles/ray/placement_group.py
++++ b/miles/ray/placement_group.py
+@@ -1,5 +1,6 @@
+ import asyncio
+ import logging
++import os
+ import socket
+ from typing import NamedTuple
+ 
+@@ -104,7 +105,15 @@
+         ray.kill(actor)
+ 
+     bundle_infos = [(i, gpu_ids[i][0], gpu_ids[i][1]) for i in range(num_bundles)]
+-    sorted_bundle_infos = sorted(bundle_infos, key=sort_key)
++    if os.environ.get("PRL_ROLLOUT_ON_HEAD") == "1":
++        # prl: rank the head node's GPUs last so they become rollout GPUs (the rollout PG is the tail of the
++        # sorted bundles). With --pin-rollout-manager-to-head the RolloutExecutor, router and session servers then
++        # share a rollout node instead of a trainer node's host memory.
++        head_ip = next(n["NodeManagerAddress"] for n in ray.nodes()
++                       if n["Alive"] and "node:__internal_head__" in n["Resources"])
++        sorted_bundle_infos = sorted(bundle_infos, key=lambda x: (x[1] == head_ip, sort_key(x)))
++    else:
++        sorted_bundle_infos = sorted(bundle_infos, key=sort_key)
+     pg_reordered_bundle_indices = [info[0] for info in sorted_bundle_infos]
+     # Map from logical index -> physical GPU ID
+     pg_reordered_gpu_ids = [gpu_ids[info[0]][1] for info in sorted_bundle_infos]
+diff --git a/miles/utils/ray_utils.py b/miles/utils/ray_utils.py
+--- a/miles/utils/ray_utils.py
++++ b/miles/utils/ray_utils.py
+@@ -22,7 +22,10 @@
+ 
+ 
+ def _get_head_node_id() -> str:
+-    for node in list_nodes():
+-        if node.is_head_node:
+-            return node.node_id
++    # prl: ray.nodes() reads the GCS; list_nodes() needs the dashboard, which a cluster may run without
++    import ray
++
++    for node in ray.nodes():
++        if node["Alive"] and "node:__internal_head__" in node["Resources"]:
++            return node["NodeID"]
+     raise RuntimeError("Could not find a head node in the Ray cluster")

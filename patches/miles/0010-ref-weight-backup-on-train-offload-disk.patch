@@ -1,0 +1,138 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+Date: Sat, 24 Oct 2026 07:20:00 +0900
+Subject: [PATCH] prl: ref weight backup on the train offload disk
+
+---
+diff --git a/miles/backends/megatron_utils/actor.py b/miles/backends/megatron_utils/actor.py
+--- a/miles/backends/megatron_utils/actor.py
++++ b/miles/backends/megatron_utils/actor.py
+@@ -234,6 +234,12 @@
+         self.weights_backuper = TensorBackuper.create(
+             source_getter=self._named_actor_weights,
+             main_cast_ctx=main_cast_ctx,
++            # prl: the ref backup goes next to this rank's train disk offload (see TensorBackuper)
++            disk_dir=(
++                os.path.join(os.environ["TMS_DISK_BACKUP_DIR"], "weights_backup")
++                if args.offload_train and args.offload_train_target == "disk" and os.environ.get("TMS_DISK_BACKUP_DIR")
++                else None
++            ),
+         )
+         self._active_model_tag: str | None = "actor"
+ 
+diff --git a/miles/utils/tensor_backper.py b/miles/utils/tensor_backper.py
+--- a/miles/utils/tensor_backper.py
++++ b/miles/utils/tensor_backper.py
+@@ -1,4 +1,5 @@
+ import hashlib
++import os
+ from abc import ABC, abstractmethod
+ from collections import defaultdict
+ from collections.abc import Callable, Iterable
+@@ -21,10 +22,10 @@
+ 
+ class TensorBackuper(ABC):
+     @staticmethod
+-    def create(source_getter, main_cast_ctx: "MainCastContext | None" = None):
++    def create(source_getter, main_cast_ctx: "MainCastContext | None" = None, disk_dir: str | None = None):
+         if main_cast_ctx is not None:
+             return _TensorBackuperMainCast(source_getter=source_getter, ctx=main_cast_ctx)
+-        return _TensorBackuperNormal(source_getter=source_getter)
++        return _TensorBackuperNormal(source_getter=source_getter, disk_dir=disk_dir)
+ 
+     def __init__(self, source_getter: _SourceGetter):
+         self._source_getter = source_getter
+@@ -51,20 +52,82 @@
+ 
+ 
+ class _TensorBackuperNormal(TensorBackuper):
+-    def __init__(self, source_getter):
++    # prl: with disk_dir, these tags live in a file there instead of pinned host memory. PPO (actor,
++    # ref and critic of a 9B model, one GPU per rank, 100 GB host limit per node) OOMed the host while a relay
++    # job's critic loaded its checkpoint: the ref copy is 18 GB per rank and is read only once per step.
++    _disk_tags = ("ref", "teacher")
++    _disk_chunk_bytes = 256 << 20
++
++    def __init__(self, source_getter, disk_dir: str | None = None):
+         super().__init__(source_getter=source_getter)
+         self._backups: dict[str, dict[str, torch.Tensor]] = defaultdict(dict)
++        self._disk_dir = disk_dir
++        self._disk_backups: dict[str, dict[str, int]] = {}  # tag -> name -> nbytes, in file order
++        self._staging: torch.Tensor | None = None
+ 
+     @property
+     def backup_tags(self):
+-        return list(self._backups)
++        return list(self._backups) + [t for t in self._disk_backups if t not in self._backups]
+ 
+     def get(self, tag: str):
+-        assert tag in self._backups, f"tag {tag!r} was never backed up"
++        assert tag in self._backups, f"tag {tag!r} was never backed up (or lives on disk)"
+         return self._backups[tag]
+ 
++    def _disk_path(self, tag: str) -> str:
++        return os.path.join(self._disk_dir, f"weights_backup_{tag}.bin")
++
++    def _staging_buffer(self) -> torch.Tensor:
++        if self._staging is None:
++            self._staging = torch.empty(self._disk_chunk_bytes, dtype=torch.uint8, pin_memory=True)
++        return self._staging
++
++    @staticmethod
++    def _flat_bytes(t: torch.Tensor) -> torch.Tensor:
++        assert t.is_contiguous(), "disk backup needs contiguous params"
++        return t.detach().view(-1).view(torch.uint8)
++
++    @torch.no_grad()
++    def _backup_to_disk(self, tag: str) -> None:
++        os.makedirs(self._disk_dir, exist_ok=True)
++        staging, sizes = self._staging_buffer(), {}
++        with open(self._disk_path(tag), "wb") as f:
++            for name, param in self._source_getter():
++                src = self._flat_bytes(param)
++                for off in range(0, src.numel(), self._disk_chunk_bytes):
++                    n = min(self._disk_chunk_bytes, src.numel() - off)
++                    staging[:n].copy_(src[off : off + n])
++                    f.write(memoryview(staging[:n].numpy()))
++                sizes[name] = src.numel()
++            f.flush()
++            os.fsync(f.fileno())
++            os.posix_fadvise(f.fileno(), 0, 0, os.POSIX_FADV_DONTNEED)
++        self._disk_backups[tag] = sizes
++
++    @torch.no_grad()
++    def _restore_from_disk(self, tag: str) -> None:
++        staging, sizes = self._staging_buffer(), self._disk_backups[tag]
++        params = dict(self._source_getter())
++        assert params.keys() == sizes.keys(), f"params changed since {tag!r} was backed up"
++        with open(self._disk_path(tag), "rb", buffering=0) as f:
++            for name, nbytes in sizes.items():
++                dst = self._flat_bytes(params[name])
++                assert dst.numel() == nbytes, name
++                for off in range(0, nbytes, self._disk_chunk_bytes):
++                    n = min(self._disk_chunk_bytes, nbytes - off)
++                    view = memoryview(staging[:n].numpy())
++                    got = 0
++                    while got < n:
++                        r = f.readinto(view[got:])
++                        assert r, f"short read in {self._disk_path(tag)}"
++                        got += r
++                    dst[off : off + n].copy_(staging[:n])
++            os.posix_fadvise(f.fileno(), 0, 0, os.POSIX_FADV_DONTNEED)
++        torch.cuda.synchronize()
++
+     @torch.no_grad()
+     def backup(self, tag: str) -> None:
++        if self._disk_dir and tag in self._disk_tags:
++            return self._backup_to_disk(tag)
+         backup_dict = self._backups[tag]
+         for name, param in self._source_getter():
+             if name not in backup_dict:
+@@ -79,6 +142,8 @@
+ 
+     @torch.no_grad()
+     def restore(self, tag: str) -> None:
++        if tag in self._disk_backups:
++            return self._restore_from_disk(tag)
+         backup_dict = self._backups[tag]
+         for name, param in self._source_getter():
+             assert name in backup_dict

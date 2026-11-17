@@ -1,0 +1,34 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "prl"
+version = "0.1.0"
+description = "PRL: Programmable Reinforcement Learning for Agents, on Miles and Harbor"
+requires-python = ">=3.10"
+# Runtime deps come from the Miles container image + build/miles (see scripts/lib/env.sh).
+dependencies = ["pyyaml"]
+
+[project.optional-dependencies]
+# ruff pinned: its default rule set changes between versions (tests/unit/test_repo_checks.py runs it)
+dev = ["pytest", "ruff==0.17.0"]
+# The no-GPU trial of a transform on recorded trajectories (python -m prl.transforms.check)
+check = ["tokenizers"]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["prl*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests/unit"]
+pythonpath = ["."]
+
+[tool.ruff]
+line-length = 120
+src = ["."]
+extend-exclude = ["third_party", "build"]
+
+[tool.ruff.lint.per-file-ignores]
+# log_rollout_data: an extra metric that fails must never cost Miles its own rollout record
+"prl/rollout/rollout_metrics.py" = ["BLE001"]

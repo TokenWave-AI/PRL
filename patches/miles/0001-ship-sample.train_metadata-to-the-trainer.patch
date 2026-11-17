@@ -1,0 +1,28 @@
+From 7e0fc446c8ea721f6ab05485174c8a8e0def7e65 Mon Sep 17 00:00:00 2001
+Date: Sat, 3 Oct 2026 19:39:07 -0400
+Subject: [PATCH 1/2] prl: ship sample.train_metadata to the trainer
+
+Add "metadata" to the per-DP-rank key whitelist in split_train_data_by_dp.
+Upstream already collects train_data["metadata"] from sample.train_metadata,
+but never sends it to the training actors, so custom advantage / loss code
+cannot see per-sample training metadata. Miles' rollout metric logging
+already skips the "metadata" key.
+---
+ miles/ray/rollout/train_data_conversion.py | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/miles/ray/rollout/train_data_conversion.py b/miles/ray/rollout/train_data_conversion.py
+index 822140b1f..2a4b6e172 100644
+--- a/miles/ray/rollout/train_data_conversion.py
++++ b/miles/ray/rollout/train_data_conversion.py
+@@ -396,6 +396,7 @@ def _package_shards(args, data: dict[str, Any], partitions) -> list[dict[str, An
+             "loss_weights",
+             "advantages",
+             "target_tokens",
++            "metadata",  # prl: sample.train_metadata, read by --custom-advantage-postprocess-path
+         ]:
+             if key not in data:
+                 continue
+-- 
+2.52.0
+

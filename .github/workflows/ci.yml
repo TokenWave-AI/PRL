@@ -1,0 +1,22 @@
+# The CPU part of the checks: lint and the unit tests (no GPU, no sandbox, no model API). The torch tests skip here;
+# they run inside the Miles image (CHAIN=unit on a cluster).
+name: ci
+on:
+  push:
+  pull_request:
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      # the packages some tests import outside the image: the versions scripts/setup/install_harbor_deps.sh pins.
+      # Harbor without its dependencies, as there (one of them is not on PyPI), plus the few the tests reach.
+      - run: pip install -e ".[dev,check]" e2b==2.56.0 litellm==1.105.1 httpx openai numpy shortuuid toml tenacity
+      - run: pip install --no-deps "harbor @ git+https://github.com/harbor-framework/harbor.git@917b3c1be7cf6553a7a9fe25de8adb6f8e639287"
+      # build/: the patched Miles tree some tests read (third_party/ + patches/)
+      - run: bash scripts/setup/apply_patches.sh
+      - run: ruff check prl tests scripts transforms
+      - run: python -m pytest -q tests/unit

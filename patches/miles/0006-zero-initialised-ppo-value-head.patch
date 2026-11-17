@@ -1,0 +1,38 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+Date: Thu, 22 Oct 2026 17:40:00 +0900
+Subject: [PATCH] prl: zero-initialised PPO value head
+
+Opt-in: PRL_VALUE_HEAD_INIT=zero starts the critic at V = 0 instead of from random head weights;
+the default `upstream` keeps Miles' normal(0, 0.02) init. Unknown values raise.
+---
+diff --git a/miles/backends/megatron_utils/model_provider.py b/miles/backends/megatron_utils/model_provider.py
+index 4cd049b..19c3406 100644
+--- a/miles/backends/megatron_utils/model_provider.py
++++ b/miles/backends/megatron_utils/model_provider.py
+@@ -2,6 +2,7 @@
+ import argparse
+ import inspect
+ import logging
++import os
+ from contextlib import nullcontext
+ from typing import Literal
+ 
+@@ -118,7 +119,17 @@ class LinearForLastLayer(torch.nn.Linear):
+         if self.sequence_parallel:
+             self.weight.sequence_parallel = True
+ 
+-        self.weight.data.normal_(mean=0.0, std=0.02)
++        # prl: PRL_VALUE_HEAD_INIT=zero starts the critic at V = 0 instead of std 0.02 x |h|: Qwen3.5-9B's
++        # final hidden states gave values of about +-6 for 0/1 rewards (value loss 41.7, grad norm 1671 clipped to 1),
++        # and ten updates went into shrinking them (two short checks). The default, `upstream`, keeps Miles' init; a
++        # critic loaded from an LM checkpoint gets that checkpoint's output-layer row instead (patch 0008).
++        init = os.environ.get("PRL_VALUE_HEAD_INIT", "upstream")
++        if init not in ("upstream", "zero"):
++            raise ValueError(f"PRL_VALUE_HEAD_INIT={init!r}: expected upstream or zero")
++        if init == "zero":
++            self.weight.data.zero_()
++        else:
++            self.weight.data.normal_(mean=0.0, std=0.02)
+         if bias:
+             self.bias.data.zero_()
+ 

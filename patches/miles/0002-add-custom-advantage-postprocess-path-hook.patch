@@ -1,0 +1,54 @@
+From ab40d083bb0b5dd225b7706a7319056c3652394f Mon Sep 17 00:00:00 2001
+Date: Sat, 3 Oct 2026 19:39:07 -0400
+Subject: [PATCH 2/2] prl: add --custom-advantage-postprocess-path hook
+
+fn(args, rollout_data, advantages, returns) -> (advantages, returns), called
+right after the advantage estimator and before OPD / normalization. Miles has
+no custom-advantage hook (slime had --custom-advantage-function-path).
+Used by prl.algo.step_advantage for step-level advantage weighting.
+---
+ miles/backends/training_utils/loss/objective.py | 8 ++++++++
+ miles/utils/arguments.py                        | 8 ++++++++
+ 2 files changed, 16 insertions(+)
+
+diff --git a/miles/backends/training_utils/loss/objective.py b/miles/backends/training_utils/loss/objective.py
+index 95cbe8d0a..3a05ea9d8 100644
+--- a/miles/backends/training_utils/loss/objective.py
++++ b/miles/backends/training_utils/loss/objective.py
+@@ -109,6 +109,14 @@ def compute_advantages_and_returns(
+         values=values,
+     )
+ 
++    # prl: optional per-token rescaling of the estimator's advantages (e.g. step-level weights).
++    if getattr(args, "custom_advantage_postprocess_path", None):
++        from miles.utils.function_registry import load_function
++
++        advantages, returns = load_function(args.custom_advantage_postprocess_path)(
++            args, rollout_data, advantages, returns
++        )
++
+     # Apply on-policy distillation KL penalty to advantages (orthogonal to advantage estimator)
+     if args.use_opd:
+         apply_opd_kl_to_advantages(
+diff --git a/miles/utils/arguments.py b/miles/utils/arguments.py
+index 48d75c89f..c268e37b5 100644
+--- a/miles/utils/arguments.py
++++ b/miles/utils/arguments.py
+@@ -1759,6 +1759,14 @@ def get_miles_extra_args_provider(add_custom_arguments=None):
+                 default=None,
+                 help="Path to the custom TIS/RS function (e.g., examples/infra_features/train_infer_mismatch_helper/mis.py:compute_mis_weights_with_cp).",
+             )
++            parser.add_argument(
++                "--custom-advantage-postprocess-path",
++                type=str,
++                default=None,
++                help="(prl) Path to fn(args, rollout_data, advantages, returns) -> (advantages, returns), "
++                "applied right after the advantage estimator and before OPD/normalization. "
++                "Per-sample sample.train_metadata is available as rollout_data['metadata'].",
++            )
+             parser.add_argument(
+                 "--custom-pg-loss-reducer-function-path",
+                 type=str,
+-- 
+2.52.0
+

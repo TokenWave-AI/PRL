@@ -1,0 +1,62 @@
+From bbce28af48587785436fe826fe3b9d72c81137c5 Mon Sep 17 00:00:00 2001
+Date: Wed, 28 Oct 2026 05:13:52 +0900
+Subject: [PATCH] prl: training entropy from the fused log-prob kernel
+
+With PRL_FUSED_LOGPROB=1 the policy log-probs come from prl.algo.fused_logprob and the full
+softmax is never materialized, so get_log_probs_and_entropy returned zeros as the entropy and
+--observe-training-entropy logged train/entropy_loss = 0. The kernel now also computes the exact entropy of
+the training forward (PRL_OBSERVE_ENTROPY=1, detached); this splits it into the same per-sample
+response chunks as the log-probs. Observed only: entropy_coef must stay 0.
+---
+ .../loss/hub/logit_processors.py              | 25 +++++++++++++++++--
+ 1 file changed, 23 insertions(+), 2 deletions(-)
+
+diff --git a/miles/backends/training_utils/loss/hub/logit_processors.py b/miles/backends/training_utils/loss/hub/logit_processors.py
+index b7377d1..b22669b 100644
+--- a/miles/backends/training_utils/loss/hub/logit_processors.py
++++ b/miles/backends/training_utils/loss/hub/logit_processors.py
+@@ -191,6 +191,23 @@ def sampling_mask_unused(rollout_sampling_mask) -> bool:
+     return rollout_sampling_mask is None
+ 
+ 
++def _prl_fused_entropy_chunks(logits, with_entropy, entropy_requires_grad, **chunk_kwargs):
++    """prl: the fused log-prob kernel computes the full-softmax entropy of the training forward
++    (prl.algo.fused_logprob, PRL_OBSERVE_ENTROPY=1) next to the log-probs; split it into the same
++    per-sample response chunks. Observed only: it carries no gradient (entropy_coef must be 0)."""
++    if not with_entropy:
++        return None
++    from prl.algo import fused_logprob
++
++    assert not entropy_requires_grad, "prl fused log-prob: entropy is observed only, set --entropy-coef 0"
++    entropy = fused_logprob.take_entropy()
++    assert entropy is not None, "prl fused log-prob: no entropy from the forward; set PRL_OBSERVE_ENTROPY=1"
++    if entropy.shape != logits.shape:
++        entropy = entropy.transpose(0, 1)  # the kernel's [s, b]; Megatron returns the log-probs as [b, s]
++    assert entropy.shape == logits.shape, f"{tuple(entropy.shape)} vs {tuple(logits.shape)}"
++    return _iter_response_chunks(entropy, include_response_indices=False, **chunk_kwargs)
++
++
+ def get_log_probs_and_entropy(
+     logits: torch.Tensor,
+     *,
+@@ -255,11 +272,15 @@ def get_log_probs_and_entropy(
+     if fused:
+         assert sampling_mask_unused(rollout_sampling_mask), "prl fused log-prob: no rollout sampling masks"
+         assert args.rollout_temperature == 1.0 or args.true_on_policy_mode, "prl fused log-prob needs temperature 1"
++        entropy_chunks = _prl_fused_entropy_chunks(
++            logits, with_entropy, entropy_requires_grad, args=args, unconcat_tokens=unconcat_tokens,
++            total_lengths=total_lengths, response_lengths=response_lengths, max_seq_lens=max_seq_lens,
++        )
+     for sample_index, (logits_chunk, tokens_chunk, response_indices) in enumerate(response_chunks):
+         if fused:
+             log_probs_list.append(-logits_chunk.squeeze(-1))
+-            if with_entropy:  # not computable without the full distribution; only used for logging here
+-                entropy_list.append(torch.zeros_like(logits_chunk.squeeze(-1)).detach())
++            if with_entropy:
++                entropy_list.append(next(entropy_chunks)[0].squeeze(-1))
+             continue
+         sampling_mask = None
+         if rollout_sampling_mask is not None:
+-- 
+2.47.3
+

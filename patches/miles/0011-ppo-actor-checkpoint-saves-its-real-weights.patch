@@ -1,0 +1,90 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+Date: Sat, 24 Oct 2026 11:45:00 +0900
+Subject: [PATCH] prl: PPO actor checkpoint saves its real weights
+
+---
+diff --git a/miles/backends/megatron_utils/actor.py b/miles/backends/megatron_utils/actor.py
+--- a/miles/backends/megatron_utils/actor.py
++++ b/miles/backends/megatron_utils/actor.py
+@@ -412,6 +412,9 @@
+                 checkpointing_context=checkpointing_context,
+             )
+ 
++        if self.role != "critic" and self.args.rebuild_params_from_master_weight_on_load:
++            self._rebuild_params_from_master_weight()
++
+         if self.role != "critic":
+             self._load_auxiliary_checkpoints()
+             self._switch_model("actor")
+@@ -421,12 +424,38 @@
+ 
+         return load_output
+ 
++    @torch.no_grad()
++    def _rebuild_params_from_master_weight(self) -> None:
++        # prl: what --rematerialize-param-from-master-weight's restore does (cast this rank's shard, all-gather)
++        from .rematerialize_utils import _build_cast_main_to_params_fn
++
++        assert self.optimizer is not None and self.args.use_distributed_optimizer
++        _build_cast_main_to_params_fn(self.optimizer, precision_aware=self.args.use_precision_aware_optimizer)()
++        for model_chunk in self.model:
++            model_chunk.start_param_sync(force_sync=True)
++        torch.cuda.synchronize()
++        logger.info("Rebuilt the actor weights from the loaded master weights")
++
++    @torch.no_grad()
++    def _take_fp32_params_from_ref(self) -> None:
++        # prl: fp32 params (Qwen3.5's 24 A_log) have no separate master weight, and the broken checkpoint holds
++        # zeros for them; ppo1023 never moved them (identical checksums at every rollout of its first job), so the
++        # loaded ref model, active right now, has their trained values
++        actor, names = self.weights_backuper.get("actor"), []
++        for name, tensor in self._named_actor_weights():
++            if tensor.dtype == torch.float32:
++                actor[name].copy_(tensor)
++                names.append(name)
++        logger.info(f"Took {len(names)} fp32 params from the ref model: {names[:4]}")
++
+     def _load_auxiliary_checkpoints(self) -> None:
+         if self._enable_weight_backup:
+             self.weights_backuper.backup("actor")
+ 
+         if self.with_ref:
+             self.load_other_checkpoint("ref", self.args.ref_load)
++            if self.args.rebuild_params_from_master_weight_on_load:
++                self._take_fp32_params_from_ref()
+ 
+         # Load teacher model for Megatron-based on-policy distillation
+         if self.with_opd_teacher:
+@@ -824,6 +853,13 @@
+ 
+         self._finalize_pending_async_save()
+ 
++        # prl: under --offload-train the actor's param buffers have no host backup
++        # (disable_param_buffers_cpu_backup), so train.py's onload before this save woke them as garbage, and every
++        # PPO actor checkpoint held that (ppo1023 iter 20: the relay's rollouts never ended a turn). The actor's own
++        # weights are in its backup; training restores them the same way.
++        if self.role != "critic" and self.args.offload_train and self._enable_weight_backup:
++            self._switch_model("actor")
++
+         save(
+             rollout_id,
+             self.model,
+diff --git a/miles/utils/arguments.py b/miles/utils/arguments.py
+--- a/miles/utils/arguments.py
++++ b/miles/utils/arguments.py
+@@ -505,6 +505,15 @@
+                 ),
+             )
+             parser.add_argument(
++                "--rebuild-params-from-master-weight-on-load",
++                action="store_true",
++                help=(
++                    "prl: after loading the actor's checkpoint, write its weights from the loaded optimizer "
++                    "master weights. Recovers checkpoints that PPO with --offload-train saved before the save fix "
++                    "(their model weights were the woken actor's dropped param buffers; the optimizer state is right)."
++                ),
++            )
++            parser.add_argument(
+                 "--check-rematerialize-param-from-master-weight",
+                 action="store_true",
+                 help="Debug: SHA256-verify the first two rematerialize cycles are bit-identical.",

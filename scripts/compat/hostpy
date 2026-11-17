@@ -1,0 +1,9 @@
+#!/bin/bash
+# PRL_HOST_PYTHON where the hosts' own Python is too old (e.g. a system Python 3.9 without the packages they need):
+# the host-side checks (find_smoke.py, the launchers' heredocs, the acceptance) run with the Miles image's Python.
+# The host environment passes
+# (PYTHONPATH, PRL_*); repo, artifacts and scratch are bound as in in_miles (scripts/lib/env.sh).
+binds=()
+for d in "$PRL_ROOT" "$PRL_EXT" "${HF_HOME:-}" "${PRL_SCRATCH:-}"; do [ -n "$d" ] && [ -e "$d" ] && binds+=(-B "$d"); done
+exec apptainer exec --no-mount hostfs,bind-paths "${binds[@]}" -B /etc/hosts -B /etc/resolv.conf \
+  "${MILES_IMAGE:?unpack the image first (scripts/lib/chain.sh sandbox)}" /opt/sglang/bin/python3 "$@"

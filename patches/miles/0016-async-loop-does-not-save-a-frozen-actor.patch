@@ -1,0 +1,24 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+Date: Mon, 2 Nov 2026 04:05:00 +0900
+Subject: [PATCH] prl: async loop does not save a frozen actor
+
+train.py skips the actor's save during --num-critic-only-steps; train_async.py did not, and Megatron raised KeyError
+'master_param' on an optimizer that has not stepped.
+---
+diff --git a/train_async.py b/train_async.py
+index d8cb41b..d10d510 100644
+--- a/train_async.py
++++ b/train_async.py
+@@ -100,7 +100,9 @@ async def train(args, *, disposer: Disposer):
+             rollout_id, args.save_interval, num_rollout_per_epoch, args.num_rollout
+         ):
+             force_sync = external_save or rollout_id == args.num_rollout - 1
+-            await save_training_model(actor_model, rollout_id, force_sync)
++            # prl: as train.py, a frozen actor has no Adam state to save (else KeyError 'master_param' in Megatron)
++            if (not args.use_critic) or (rollout_id >= args.num_critic_only_steps):
++                await save_training_model(actor_model, rollout_id, force_sync)
+             if args.use_critic:
+                 await save_training_model(critic_model, rollout_id, force_sync)
+             await rollout_executor.save(rollout_id)
+-- 
+2.43.0

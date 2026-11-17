@@ -1,0 +1,53 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+Date: Thu, 22 Oct 2026 19:20:00 +0900
+Subject: [PATCH] prl: zero a PPO value head loaded from an LM checkpoint
+
+Opt-in: only with PRL_VALUE_HEAD_INIT=zero, like patch 0006.
+---
+diff --git a/miles/backends/megatron_utils/checkpoint.py b/miles/backends/megatron_utils/checkpoint.py
+index fcb646f..21742d1 100644
+--- a/miles/backends/megatron_utils/checkpoint.py
++++ b/miles/backends/megatron_utils/checkpoint.py
+@@ -157,9 +157,42 @@ def load_checkpoint(ddp_model, optimizer, opt_param_scheduler, checkpointing_con
+                     f"Training will start with freshly initialized adapter weights."
+                 )
+ 
++    _zero_value_heads_unless_from_a_critic(ddp_model, optimizer, load_path)
++
+     return (*result, native_optimizer_restored)
+ 
+ 
++def _zero_value_heads_unless_from_a_critic(ddp_model, optimizer, load_path) -> None:
++    # prl: a critic started from the LM checkpoint (its tracker says "release", so not the finetune path) got
++    # its [1, hidden] value head from the first row of the checkpoint's [vocab, hidden] output_layer.weight (values of
++    # about +-6, value loss 41.7 at step 0 with or without patch 0006's zero init, in short checks). Re-zero the head
++    # unless the checkpoint holds a value head, then refresh the optimizer's main params from the model's. Only with
++    # PRL_VALUE_HEAD_INIT=zero (patch 0006); the default keeps that row, as upstream Miles does.
++    if os.environ.get("PRL_VALUE_HEAD_INIT", "upstream") != "zero":
++        return
++    heads = [m for chunk in unwrap_model(ddp_model) for m in chunk.modules() if isinstance(m, LinearForLastLayer)]
++    if not heads or not _is_megatron_checkpoint(load_path):
++        return
++    from torch.distributed.checkpoint import FileSystemReader
++
++    path = Path(load_path)
++    if not re.fullmatch(r"iter_\d{7}", path.name):
++        args = get_args()
++        tracked = (path / "latest_checkpointed_iteration.txt").read_text().strip()
++        step = getattr(args, "ckpt_step", None)
++        path = path / ("release" if tracked == "release" and step is None else f"iter_{int(step or tracked):07d}")
++    stored = FileSystemReader(str(path)).read_metadata().state_dict_metadata.get("output_layer.weight")
++    if stored is not None and stored.size[0] == 1:
++        return
++    logger.info(f"Value head zeroed: {path} has output_layer.weight {getattr(stored, 'size', None)}, not a critic's")
++    for head in heads:
++        head.weight.data.zero_()
++        if head.bias is not None:
++            head.bias.data.zero_()
++    if optimizer is not None and hasattr(optimizer, "reload_model_params"):
++        optimizer.reload_model_params()
++
++
+ def save_checkpoint_with_lora(
+     iteration, model, optimizer, opt_param_scheduler, *, publisher: SnapshotPublisher | None = None
+ ):

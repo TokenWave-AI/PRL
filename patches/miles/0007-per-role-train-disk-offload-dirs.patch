@@ -1,0 +1,38 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+Date: Thu, 22 Oct 2026 17:45:00 +0900
+Subject: [PATCH] prl: per-role train disk-offload dirs (PPO actor +
+ critic)
+
+---
+diff --git a/miles/ray/specs/train.py b/miles/ray/specs/train.py
+--- a/miles/ray/specs/train.py
++++ b/miles/ray/specs/train.py
+@@ -213,7 +213,7 @@
+         category=POOL_CATEGORY_TRAINER_ENGINE,
+         deploy_component=DeployComponent.TRAINER,
+         port_infos=[PortInfo(name=MASTER_PORT_NAME, static_port=9000, mode="master", allow_dynamic=True)],
+-        env_var=lambda ctx: compute_trainer_env_vars(args, ctx, fp8_scales=fp8_scales),
++        env_var=lambda ctx: compute_trainer_env_vars(args, ctx, fp8_scales=fp8_scales, role=config.role),
+         scheduling=SchedulingSpec(
+             num_cells=num_cells,
+             num_workers_per_cell=gpus_per_cell,
+@@ -241,7 +241,7 @@
+     )
+ 
+ 
+-def compute_trainer_env_vars(args, ctx: WorkerLaunchContext, *, fp8_scales: str) -> dict[str, str]:
++def compute_trainer_env_vars(args, ctx: WorkerLaunchContext, *, fp8_scales: str, role: str | None = None) -> dict[str, str]:
+     env_vars = {
+         # because sglang will always set NCCL_CUMEM_ENABLE to 0
+         # we need also set it to 0 to prevent nccl error.
+@@ -273,7 +273,9 @@
+             env_vars["TMS_DISK_BACKUP_CHUNK_MB"] = str(args.offload_train_disk_chunk_mb)
+             env_vars["TMS_DISK_BACKUP_DIR"] = os.path.join(
+                 args.offload_train_disk_dir,
+-                f"cell{format_name_index(ctx.cell_index)}_rank{format_name_index(ctx.worker_in_cell_index)}",
++                # prl: per role: a PPO critic shares the actor's cells and ranks, and its startup wipe
++                # (_setup_disk_offload_reclaim) deleted the offloaded actor's backup files
++                f"{role + '_' if role else ''}cell{format_name_index(ctx.cell_index)}_rank{format_name_index(ctx.worker_in_cell_index)}",
+             )
+         else:
+             env_vars["TMS_INIT_ENABLE_CPU_BACKUP"] = "1"

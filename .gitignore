@@ -1,0 +1,22 @@
+build/
+__pycache__/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+# Local collaboration notes and agent state
+/CLAUDE.md
+/AGENTS.md
+/.claude/
+# Local environments, keys, container images
+.venv*/
+.env
+.env.*
+!.env.example
+private/
+*_api_key
+*.key
+*.pem
+*.sif
+# Site profiles hold your paths, accounts and endpoints: only the example is tracked
+configs/sites/*.env
+!configs/sites/example.env

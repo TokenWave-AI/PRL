@@ -1,0 +1,48 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+Date: Sun, 25 Oct 2026 12:30:00 +0900
+Subject: [PATCH] prl: drop the optimizer's stale master copies after a checkpoint load
+
+---
+diff --git a/miles/backends/megatron_utils/actor.py b/miles/backends/megatron_utils/actor.py
+--- a/miles/backends/megatron_utils/actor.py
++++ b/miles/backends/megatron_utils/actor.py
+@@ -1,4 +1,5 @@
+ import atexit
++import gc
+ import logging
+ import os
+ import shutil
+@@ -412,6 +413,8 @@
+                 checkpointing_context=checkpointing_context,
+             )
+ 
++        self._drop_stale_optimizer_masters()
++
+         if self.role != "critic" and self.args.rebuild_params_from_master_weight_on_load:
+             self._rebuild_params_from_master_weight()
+ 
+@@ -424,6 +427,24 @@
+ 
+         return load_output
+ 
++    def _drop_stale_optimizer_masters(self) -> None:
++        # prl: HybridDeviceOptimizer's post-load hook rebuilds its sub-optimizers (new fp32 masters) while the
++        # loaded state's "master_param" entries still hold the previous ones on the GPU, until the first step()
++        # resyncs. A relay's first update then has ~6 GB less (in a 9B PPO relay the actor's step OOMed by 30 MB;
++        # every relay of that run sat at 58 GB allocated where its first job had 52). Do step()'s resync now.
++        if self.optimizer is None or not self.args.optimizer_cpu_offload:
++            return
++        from megatron.core.optimizer.cpu_offloading.hybrid_optimizer import HybridDeviceOptimizer
++
++        before = torch.cuda.memory_allocated()
++        for dist_opt in getattr(self.optimizer, "chained_optimizers", [self.optimizer]):
++            if isinstance(getattr(dist_opt, "optimizer", None), HybridDeviceOptimizer):
++                dist_opt.optimizer._sync_sub_optimizers_state_to_hdo()
++        gc.collect()
++        torch.cuda.empty_cache()
++        freed = (before - torch.cuda.memory_allocated()) / 2**30
++        logger.info(f"{self.role}: dropped the optimizer's stale master copies after loading, {freed:.2f} GB freed")
++
+     @torch.no_grad()
+     def _rebuild_params_from_master_weight(self) -> None:
+         # prl: what --rematerialize-param-from-master-weight's restore does (cast this rank's shard, all-gather)

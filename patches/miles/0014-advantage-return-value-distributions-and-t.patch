@@ -1,0 +1,107 @@
+From 504c47964f0ca3a7cf67b0bd318f6f13032ef4e3 Mon Sep 17 00:00:00 2001
+Date: Wed, 28 Oct 2026 05:29:35 +0900
+Subject: [PATCH] prl: advantage / return / value distributions and the
+ critic's explained variance
+
+Miles logs only the means of the token-level rollout fields. After them, log the std / min / max of
+advantages, returns and values over the loss-masked tokens, and 1 - Var(returns - values) / Var(returns)
+(verl's critic/vf_explained_var) when values are present, reduced over the DP x CP ranks from
+(sum, sum of squares, count, min, max) on CP-local masks. Logged as "rollout_dist N" at the rollout step.
+A failure on a rank logs a warning and still joins the gather, so it never stalls or stops training.
+---
+ .../training_utils/metrics/log_utils.py       | 65 ++++++++++++++++++-
+ 1 file changed, 64 insertions(+), 1 deletion(-)
+
+diff --git a/miles/backends/training_utils/metrics/log_utils.py b/miles/backends/training_utils/metrics/log_utils.py
+index 300fc85..f189640 100644
+--- a/miles/backends/training_utils/metrics/log_utils.py
++++ b/miles/backends/training_utils/metrics/log_utils.py
+@@ -7,7 +7,7 @@ import psutil
+ import torch
+ import torch.distributed as dist
+ 
+-from miles.backends.training_utils.data.context_parallel import get_sum_of_sample_mean
++from miles.backends.training_utils.data.context_parallel import get_local_response_loss_masks, get_sum_of_sample_mean
+ from miles.backends.training_utils.data.rollout import DataIterator
+ from miles.backends.training_utils.metrics import perf
+ from miles.backends.training_utils.parallel import get_parallel_state
+@@ -166,6 +166,68 @@ def aggregate_forward_results(
+     return rollout_data
+ 
+ 
++def _prl_token_moments(rollout_data: RolloutBatch, masks: list[torch.Tensor], key: str):
++    """Local (sum, sum of squares, count, min, max) of a token-level field over this rank's loss-masked tokens."""
++    x = torch.cat(rollout_data[key]).detach().float()
++    m = torch.cat(masks).to(x.device).bool()
++    if x.numel() != m.numel():
++        raise ValueError(f"{key}: {x.numel()} tokens vs {m.numel()} mask entries")
++    x = x[m]
++    if x.numel() == 0:
++        return (0.0, 0.0, 0, float("inf"), float("-inf"))
++    return (x.sum().item(), (x * x).sum().item(), x.numel(), x.min().item(), x.max().item())
++
++
++def _prl_log_token_distributions(rollout_id: int, args: Namespace, rollout_data: RolloutBatch) -> None:
++    """prl: std / min / max of advantages, returns and values over the loss-masked tokens, and the critic's
++    explained variance 1 - Var(returns - values) / Var(returns) (verl's critic/vf_explained_var), gathered over the
++    DP x CP ranks (CP-local masks). Logged as ``rollout_dist N`` with the rollout step."""
++    keys = [k for k in ("advantages", "returns", "values")
++            if isinstance(rollout_data.get(k), (list, tuple)) and len(rollout_data[k]) and isinstance(rollout_data[k][0], torch.Tensor)]
++    if not keys:
++        return
++    try:  # every rank must reach the gather below, whatever happens here
++        masks = get_local_response_loss_masks(
++            rollout_data["total_lengths"], rollout_data["response_lengths"], rollout_data["loss_masks"],
++            qkv_format=args.qkv_format, max_seq_lens=rollout_data.get("max_seq_lens", None),
++        )
++        local = {k: _prl_token_moments(rollout_data, masks, k) for k in keys}
++        if "returns" in keys and "values" in keys:
++            diff = [r.float() - v.float().to(r.device)
++                    for r, v in zip(rollout_data["returns"], rollout_data["values"], strict=True)]
++            local["residual"] = _prl_token_moments({"residual": diff}, masks, "residual")
++    except Exception:
++        logger.warning("prl: token distribution metrics failed on this rank", exc_info=True)
++        local = {}
++    pg = get_parallel_state().effective_dp_cp
++    try:
++        gathered = MultiPGUtil.gather_object(obj=local, groups_inner_to_outer=pg.gloo_groups_inner_to_outer)
++    except RuntimeError:
++        logger.warning("prl: token distribution gather failed", exc_info=True)
++        return
++    if pg.rank != 0:
++        return
++    out, var = {}, {}
++    for k in {k for g in gathered for k in g}:
++        parts = [g[k] for g in gathered if k in g]
++        n = sum(p[2] for p in parts)
++        if n == 0:
++            continue
++        mean = sum(p[0] for p in parts) / n
++        var[k] = max(0.0, sum(p[1] for p in parts) / n - mean * mean)
++        if k != "residual":
++            out[f"rollout/{k}_std"] = var[k] ** 0.5
++            out[f"rollout/{k}_min"] = min(p[3] for p in parts)
++            out[f"rollout/{k}_max"] = max(p[4] for p in parts)
++    if "residual" in var and var.get("returns", 0) > 0:
++        out["rollout/vf_explained_var"] = 1.0 - var["residual"] / var["returns"]
++    logger.info(f"rollout_dist {rollout_id}: {out}")
++    out, step_key = namespace_metrics(
++        out, trainer_model_id=args.trainer_model_id, step_name="rollout/step", step=compute_rollout_step(args, rollout_id)
++    )
++    tracking.log(args, out, step_key=step_key)
++
++
+ def log_rollout_data(rollout_id: int, args: Namespace, rollout_data: RolloutBatch) -> None:
+     """
+     Summarize rollout fields and log reduced metrics on PP last stage, TP rank 0.
+@@ -262,6 +324,7 @@ def log_rollout_data(rollout_id: int, args: Namespace, rollout_data: RolloutBatc
+                 raise ValueError(f"Unsupported type: {type(val)} for key: {key}")
+ 
+         reduced_log_dict = gather_log_data("rollout", args, rollout_id, log_dict)
++        _prl_log_token_distributions(rollout_id, args, rollout_data)
+         if args.ci_test and not args.ci_disable_logprobs_checker and reduced_log_dict is not None:
+             reduced_log_dict = strip_metrics_namespace(reduced_log_dict, trainer_model_id=args.trainer_model_id)
+             if (
+-- 
+2.47.3
+

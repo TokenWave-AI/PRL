@@ -1,0 +1,52 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+Date: Sun, 1 Nov 2026 17:00:00 +0900
+Subject: [PATCH] prl: dumps without the routing arrays
+
+--dump-details saves every sample's R3 routes, (tokens - 1) x layers x top-k int32: ~13 GB per update of a 35B-A3B
+64 x 8 run, against the group's quota. --dump-without-routed-experts leaves them out of the rollout and train dumps;
+training is not affected.
+---
+diff --git a/miles/backends/training_utils/metrics/train_dump.py b/miles/backends/training_utils/metrics/train_dump.py
+index 25171d6..fabae46 100644
+--- a/miles/backends/training_utils/metrics/train_dump.py
++++ b/miles/backends/training_utils/metrics/train_dump.py
+@@ -31,6 +31,8 @@ def save_debug_train_data_for_rank(args, *, rollout_id, rollout_data, rank, cp_r
+     this runs outside the process group in tests and offline tools.
+     """
+     if (path_template := args.save_debug_train_data) is not None:
++        if getattr(args, "dump_without_routed_experts", False):  # prl: see --dump-without-routed-experts
++            rollout_data = {k: v for k, v in rollout_data.items() if k != "rollout_routed_experts"}
+         path = Path(path_template.format(rollout_id=rollout_id, rank=rank))
+         logger.info(f"Save debug train data to {path}")
+         path.parent.mkdir(parents=True, exist_ok=True)
+diff --git a/miles/ray/rollout/debug_data.py b/miles/ray/rollout/debug_data.py
+index 9c726f1..c15a7f8 100644
+--- a/miles/ray/rollout/debug_data.py
++++ b/miles/ray/rollout/debug_data.py
+@@ -130,6 +130,9 @@ def save_debug_rollout_data(
+ 
+         # TODO may improve the format
+         dump_data = dict(samples=[sample.to_dict() for sample in samples])
++        if getattr(args, "dump_without_routed_experts", False):  # prl: 13 GB per update on a 35B-A3B
++            for sample in dump_data["samples"]:
++                sample.pop("rollout_routed_experts", None)
+         torch.save(dict(rollout_id=rollout_id, metadata=metadata or {}, **dump_data), path)
+ 
+ 
+diff --git a/miles/utils/arguments.py b/miles/utils/arguments.py
+index 130305e..eb391c9 100644
+--- a/miles/utils/arguments.py
++++ b/miles/utils/arguments.py
+@@ -1699,6 +1699,12 @@ def get_miles_extra_args_provider(add_custom_arguments=None):
+                     "This is useful for doing special loss mask."
+                 ),
+             )
++            parser.add_argument(
++                "--dump-without-routed-experts",
++                action="store_true",
++                default=False,
++                help="prl: leave the R3 routing arrays out of the --dump-details dumps (they dominate their size).",
++            )
+             parser.add_argument(
+                 "--observe-training-entropy",
+                 action="store_true",

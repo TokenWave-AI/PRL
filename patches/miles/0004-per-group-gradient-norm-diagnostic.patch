@@ -1,0 +1,70 @@
+From 1a935d712c66c39393f00ffa07b41a1bcb5c973e Mon Sep 17 00:00:00 2001
+Date: Tue, 6 Oct 2026 05:07:32 +0900
+Subject: [PATCH] prl: per-group gradient-norm diagnostic
+ (PRL_LOG_GRAD_GROUPS=1)
+
+---
+ miles/backends/megatron_utils/model.py | 33 ++++++++++++++++++++++++++
+ 1 file changed, 33 insertions(+)
+
+diff --git a/miles/backends/megatron_utils/model.py b/miles/backends/megatron_utils/model.py
+index 3d0aee6..57acd6c 100644
+--- a/miles/backends/megatron_utils/model.py
++++ b/miles/backends/megatron_utils/model.py
+@@ -4,6 +4,7 @@ import dataclasses
+ import gc
+ import logging
+ import math
++import os
+ from argparse import Namespace
+ from collections.abc import Callable, Sequence
+ from contextlib import nullcontext
+@@ -574,6 +575,34 @@ def run_forward_backward_pass(
+         )
+ 
+ 
++def _prl_log_grad_groups(model, rollout_id, step_id):
++    """prl diagnostic: L2 norm of the gradients (main_grad if present) per parameter group."""
++    groups = {}
++    for chunk in model:
++        for name, p in chunk.named_parameters():
++            g = getattr(p, "main_grad", None)
++            if g is None:
++                g = p.grad
++            if g is None:
++                continue
++            if "word_embeddings" in name or "output_layer" in name:
++                k = "embed_or_output"
++            elif "layernorm" in name or "norm" in name.split(".")[-2:][0]:
++                k = "norms"
++            elif "linear_attn" in name:
++                k = "gdn_linear_attn"
++            elif "self_attention" in name:
++                k = "full_attn"
++            elif "mlp" in name:
++                k = "mlp"
++            else:
++                k = "other"
++            n2, cnt = groups.get(k, (0.0, 0))
++            groups[k] = (n2 + float(g.float().pow(2).sum()), cnt + p.numel())
++    msg = " ".join(f"{k}={v[0] ** 0.5:.4e}(n={v[1] / 1e6:.0f}M)" for k, v in sorted(groups.items()))
++    logger.info(f"[prl] grad groups rollout={rollout_id} step={step_id}: {msg}")
++
++
+ def train_one_step(
+     args: Namespace,
+     rollout_id: int,
+@@ -635,6 +664,10 @@ def train_one_step(
+             else:
+                 valid_step = not (math.isnan(grad_norm) or math.isinf(grad_norm))
+ 
++    # prl: optional per-group gradient-norm diagnostic (PRL_LOG_GRAD_GROUPS=1), right before the step.
++    if os.environ.get("PRL_LOG_GRAD_GROUPS") == "1":
++        _prl_log_grad_groups(model, rollout_id, step_id)
++
+     # CI check: verify only MTP parameters have non-zero gradients when truncation happens
+     # This check must happen before optimizer.step() as gradients may be modified during step
+     if args.ci_test and args.enable_mtp_training and args.rollout_max_response_len <= 128:
+-- 
+2.47.3
+

@@ -1,0 +1,8 @@
+#!/bin/bash
+# For a cluster with SingularityCE and no apptainer: the site profile puts scripts/compat first on PATH and sets
+# PRL_SINGULARITY to the singularity binary. SingularityCE takes the apptainer flags our scripts use (exec --nv
+# --cleanenv --no-mount --home --env -B --pid); only the environment variables are named differently.
+[ -n "${APPTAINER_TMPDIR:-}" ] && export SINGULARITY_TMPDIR=$APPTAINER_TMPDIR
+[ -n "${APPTAINER_CONFIGDIR:-}" ] && export SINGULARITY_CONFIGDIR=$APPTAINER_CONFIGDIR
+[ -n "${APPTAINER_CACHEDIR:-}" ] && export SINGULARITY_CACHEDIR=$APPTAINER_CACHEDIR
+exec "${PRL_SINGULARITY:-singularity}" "$@"
