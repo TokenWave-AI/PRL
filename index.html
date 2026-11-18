@@ -215,6 +215,25 @@
    and the label goes, below 840px the first nav link goes. */
 @media(max-width:1100px){.edit-toggle{margin:0;border:0;padding:6px;gap:0}.edit-toggle span{display:none}.edit-toggle svg{width:17px;height:17px}.header-inner:has(.edit-toggle) :is(.header-label,.header-divider){display:none}}
 @media(max-width:840px){.header-inner:has(.edit-toggle) nav a:first-child{display:none}}
+/* FIG. 03, the training reward curves: app.js draws the SVG at the frame's width, so its text keeps the page's sizes. Colours as in
+   FIG. 02: standard RL in the neutral greys (the bar grey for each update, the muted grey for the mean), signed ATLAS in the Reweight
+   blue (a light tint for each update). */
+.curve{height:340px}
+.curve svg{display:block;overflow:visible}
+.curve text{font:12px var(--mono);fill:var(--muted)}
+.curve .grid{stroke:var(--line);stroke-width:1}
+.curve .axis{stroke:#C9CFD9;stroke-width:1}
+.curve .raw,.curve .mean{fill:none;stroke-linejoin:round;stroke-linecap:round}
+.curve .raw{stroke-width:1.25}
+.curve .mean{stroke-width:2.5}
+.curve .raw[data-family=base]{stroke:#C9CFD9}
+.curve .mean[data-family=base]{stroke:var(--muted)}
+.curve .raw[data-family=reweight]{stroke:var(--blue);stroke-opacity:.3}
+.curve .mean[data-family=reweight]{stroke:var(--blue)}
+.chart-legend i.legend-line{width:16px;height:3px;border-radius:2px}
+.legend-line-base{background:var(--muted)}
+.legend-line-reweight{background:var(--blue)}
+@media(max-width:680px){.curve{height:240px}.curve text{font-size:11px}}
 </style>
 </head>
 <body>
@@ -300,6 +319,12 @@ Try your own approach.</h2></div><p class="prose" data-field="exploreBody">PRL i
           <figcaption data-field="benchmarkNote">Model: Qwen3.5-9B. Training: OpenThoughts-Agent-v1-RL. Evaluation: OpenThoughts-TB-dev.</figcaption>
         </figure>
         <p class="prose results-body" data-field="resultsBody">Reweight, Rewrite, and Reroll have all run through the full training pipeline. Reweight performed best in these initial runs, while the teacher-editing and reroll configurations leave room for further exploration. The transforms and templates are available as starting points for your own experiments.</p>
+        <figure class="benchmark curve-figure">
+          <div class="figure-heading"><div><span class="figure-index">FIG. 03 / Training reward (%)</span><h3 data-field="curveTitle">Similar training reward, different held-out results.</h3></div></div>
+          <div id="curve" class="curve" role="img"></div>
+          <div class="chart-legend"><span><i class="legend-line legend-line-base"></i>GRPO</span><span><i class="legend-line legend-line-reweight"></i>signed ATLAS</span></div>
+          <figcaption data-field="curveNote">Faint lines: training reward on each of 68 updates (32 tasks × 8 attempts). Solid lines: the mean of the last 8. Both runs rise alike, from about 57% in the first quarter of training to 67% in the last; the gap appears on held-out TB-dev, 58.09% versus 54.32%.</figcaption>
+        </figure>
       </section>
 
       <section id="start" class="start-section section wrap" aria-labelledby="start-title">
@@ -359,6 +384,8 @@ Your next transform.</h2><a href="#resources" class="button solid">Explore PRL <
     "resultsIntro": "We ran several transforms end to end with Qwen3.5-9B, training on OpenThoughts-Agent-v1-RL and evaluating on OpenThoughts-TB-dev. These runs provide initial examples of what can be implemented through the interface.",
     "benchmarkTitle": "Different transforms in the same framework.",
     "benchmarkNote": "Model: Qwen3.5-9B. Training: OpenThoughts-Agent-v1-RL. Evaluation: OpenThoughts-TB-dev.",
+    "curveTitle": "Similar training reward, different held-out results.",
+    "curveNote": "Faint lines: training reward on each of 68 updates (32 tasks × 8 attempts). Solid lines: the mean of the last 8. Both runs rise alike, from about 57% in the first quarter of training to 67% in the last; the gap appears on held-out TB-dev, 58.09% versus 54.32%.",
     "resultsBody": "Reweight, Rewrite, and Reroll have all run through the full training pipeline. Reweight performed best in these initial runs, while the teacher-editing and reroll configurations leave room for further exploration. The transforms and templates are available as starting points for your own experiments.",
     "startTitle": "Write a function.\nRun an experiment.",
     "startBody": "Start with the 8 recorded training trajectories included in the repository. Check a transform without a GPU, inspect its decisions and model calls, then connect it to cluster training.",
@@ -436,6 +463,161 @@ Your next transform.</h2><a href="#resources" class="button solid">Explore PRL <
       "detail": "rewrite · added=reroll"
     }
   ],
+  "curves": {
+    "window": 8,
+    "series": [
+      {
+        "id": "grpo",
+        "label": "GRPO",
+        "family": "base",
+        "values": [
+          54.3,
+          52.73,
+          63.28,
+          56.25,
+          57.42,
+          48.05,
+          60.55,
+          65.23,
+          59.38,
+          58.2,
+          37.11,
+          60.94,
+          49.61,
+          61.72,
+          60.16,
+          59.77,
+          62.5,
+          60.94,
+          55.47,
+          62.11,
+          60.16,
+          62.5,
+          57.81,
+          64.45,
+          63.67,
+          59.77,
+          56.64,
+          55.47,
+          59.77,
+          62.89,
+          58.2,
+          71.48,
+          68.36,
+          55.08,
+          72.66,
+          52.73,
+          64.06,
+          62.89,
+          71.48,
+          64.84,
+          68.75,
+          73.44,
+          64.84,
+          57.42,
+          59.38,
+          62.11,
+          73.05,
+          62.89,
+          69.53,
+          67.58,
+          74.22,
+          66.02,
+          59.38,
+          72.66,
+          62.11,
+          58.2,
+          64.84,
+          66.8,
+          53.91,
+          75.78,
+          81.25,
+          75.78,
+          71.88,
+          56.64,
+          64.06,
+          69.92,
+          68.36,
+          75
+        ]
+      },
+      {
+        "id": "signed",
+        "label": "signed ATLAS",
+        "family": "reweight",
+        "values": [
+          57.98,
+          47.66,
+          54.3,
+          60.16,
+          66.41,
+          57.42,
+          57.81,
+          50.78,
+          58.59,
+          66.41,
+          59.77,
+          56.64,
+          60.94,
+          39.84,
+          53.7,
+          66.02,
+          53.12,
+          59.38,
+          58.98,
+          53.12,
+          62.89,
+          69.14,
+          62.11,
+          57.81,
+          55.86,
+          71.88,
+          60.55,
+          64.06,
+          53.12,
+          56.25,
+          71.88,
+          62.11,
+          67.58,
+          51.56,
+          57.81,
+          59.77,
+          77.73,
+          62.89,
+          59.3,
+          73.44,
+          66.02,
+          65.62,
+          58.37,
+          68.75,
+          69.53,
+          56.25,
+          65.23,
+          60.94,
+          70.93,
+          65.76,
+          64.84,
+          68.75,
+          65.62,
+          66.8,
+          78.12,
+          68.36,
+          63.28,
+          57.42,
+          65.23,
+          72.27,
+          71.09,
+          61.48,
+          71.88,
+          67.58,
+          73.83,
+          69.92,
+          63.67,
+          59.69
+        ]
+      }
+    ]
+  },
   "resources": [
     {
       "id": "github",
@@ -459,7 +641,7 @@ Your next transform.</h2><a href="#resources" class="button solid">Explore PRL <
   "code": "from prl.algo import labeler\n\nasync def focus(traj):\n    critical = await labeler.label(traj)\n    if critical is None:\n        traj.skip(\"judge returned no usable labels\")\n        return traj\n    for step in traj.steps:\n        if step.index not in critical:\n            step.mask()\n    return traj",
   "commands": {
     "check": "PRL_TRANSFORM=focus MODEL_HF_DIR=/path/to/tokenizer \\\nPRL_TRANSFORM_CHECK_OUT=/tmp/prl-check \\\npython -m prl.transforms.check",
-    "train": "PRL_SITE=your_cluster CHAIN=train_eval \\\nARM=ota_train_transform TRANSFORM=focus \\\nPRL_RUN_ID=my_run bash scripts/submit.sh"
+    "train": "PRL_SITE=your_cluster TRANSFORM=focus \\\nbash scripts/quickstart.sh"
   },
   "video": {
     "path": "media/prl-intro.mp4",
@@ -548,6 +730,7 @@ Your next transform.</h2><a href="#resources" class="button solid">Explore PRL <
       `## ${p('resultsTitle')}`, t.resultsIntro,
       `| Run | Operation | TB-dev |\n| --- | --- | ---: |\n${data.metrics.map(m => `| ${pipe(m.label)} | ${m.family === 'base' ? '—' : m.family} | ${fixed(m.score)}% |`).join('\n')}`,
       t.benchmarkNote, t.resultsBody,
+      `### ${p('curveTitle')}`, t.curveNote,
       `## ${p('startTitle')}`, t.startBody, t.startNote,
       '### Local check', code(data.commands.check, 'bash'),
       '### Cluster training', code(data.commands.train, 'bash'), t.preflight,
@@ -631,6 +814,40 @@ Your next transform.</h2><a href="#resources" class="button solid">Explore PRL <
       row.append(label, track, score); chart.append(row);
     }
   }
+  // FIG. 03: per-update values as faint lines, the mean of the last `window` updates as solid lines, drawn at the frame's
+  // pixel size (redrawn when it changes) so the axis text keeps the page's font sizes on every screen.
+  const SVG_NS = 'http://www.w3.org/2000/svg';
+  const svgNode = (tag, attrs) => { const node = document.createElementNS(SVG_NS, tag); for (const [k, v] of Object.entries(attrs)) node.setAttribute(k, String(v)); return node; };
+  const svgText = (text, attrs) => { const node = svgNode('text', attrs); node.textContent = text; return node; };
+  let curveWidth = 0;
+  function renderCurve() {
+    const box = $('#curve'); if (!box || !state.curves) return;
+    const width = Math.round(box.clientWidth), height = Math.round(box.clientHeight);
+    if (!width || !height) return;
+    curveWidth = width;
+    const {series, window: span} = state.curves;
+    const count = Math.max(...series.map(s => s.values.length)), all = series.flatMap(s => s.values);
+    const lo = Math.floor((Math.min(...all) - 1) / 5) * 5, hi = Math.ceil((Math.max(...all) + 1) / 5) * 5;
+    const m = {top: 8, right: 6, bottom: 48, left: 30};
+    const x = i => m.left + i / (count - 1) * (width - m.left - m.right);
+    const y = v => m.top + (hi - v) / (hi - lo) * (height - m.top - m.bottom);
+    const root = svgNode('svg', {viewBox: `0 0 ${width} ${height}`, width, height, 'aria-hidden': 'true', focusable: 'false'});
+    for (let v = Math.ceil(lo / 10) * 10; v <= hi; v += 10) {
+      root.append(svgNode('line', {class: 'grid', x1: m.left, x2: width - m.right, y1: y(v), y2: y(v)}));
+      root.append(svgText(v, {x: m.left - 8, y: y(v), dy: '0.35em', 'text-anchor': 'end'}));
+    }
+    root.append(svgNode('line', {class: 'axis', x1: m.left, x2: width - m.right, y1: y(lo), y2: y(lo)}));
+    const step = width < 480 ? 20 : 10;
+    for (let i = 0; i < count; i += step) root.append(svgText(i, {x: x(i), y: y(lo) + 20, 'text-anchor': 'middle'}));
+    root.append(svgText('Update', {x: m.left + (width - m.left - m.right) / 2, y: height - 4, 'text-anchor': 'middle'}));
+    const path = values => values.map((v, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y(v).toFixed(1)}`).join('');
+    const mean = values => values.map((v, i) => { const part = values.slice(Math.max(0, i - span + 1), i + 1); return part.reduce((a, b) => a + b, 0) / part.length; });
+    for (const s of series) root.append(svgNode('path', {class: 'raw', 'data-family': s.family, d: path(s.values)}));
+    for (const s of series) root.append(svgNode('path', {class: 'mean', 'data-family': s.family, d: path(mean(s.values))}));
+    const quarter = Math.floor(count / 4), avg = list => (list.reduce((a, b) => a + b, 0) / list.length).toFixed(1);
+    box.setAttribute('aria-label', `Line chart of the training reward per update over ${count} updates. Mean of the first and the last quarter: ${series.map(s => `${s.label} ${avg(s.values.slice(0, quarter))}% and ${avg(s.values.slice(-quarter))}%`).join('; ')}.`);
+    box.replaceChildren(root);
+  }
   function renderResources() {
     const grid = $('#resource-grid'); grid.replaceChildren();
     state.resources.forEach((resource, index) => {
@@ -652,7 +869,7 @@ Your next transform.</h2><a href="#resources" class="button solid">Explore PRL <
     $('#command-code').textContent = state.commands[command];
     $('#command-context').textContent = command === 'check' ? 'PRL repository root · Bash · replace the tokenizer path' : 'Configured cluster · Bash · replace your_cluster';
   }
-  function renderAll() { renderFields(); renderMetrics(); renderResources(); renderCode(); }
+  function renderAll() { renderFields(); renderMetrics(); renderCurve(); renderResources(); renderCode(); }
   function activateTab(button, buttons, panelId) {
     buttons.forEach(tab => { const active = tab === button; tab.setAttribute('aria-selected',String(active)); tab.tabIndex = active ? 0 : -1; });
     $(`#${panelId}`).setAttribute('aria-labelledby',button.id);
@@ -762,6 +979,9 @@ Your next transform.</h2><a href="#resources" class="button solid">Explore PRL <
   let ticking = false;
   window.addEventListener('scroll',() => { if (!ticking) { requestAnimationFrame(() => { progress(); ticking = false; }); ticking = true; } },{passive:true});
   window.addEventListener('resize',progress);
+  const curveBox = $('#curve');
+  if (curveBox && 'ResizeObserver' in window) new ResizeObserver(() => { if (Math.round(curveBox.clientWidth) !== curveWidth) renderCurve(); }).observe(curveBox);
+  else window.addEventListener('resize',renderCurve);
   window.addEventListener('pagehide',() => { if (editing) saveDraft(); });
   renderAll(); progress();
   if (restored) toast('Restored the draft saved in this browser');
