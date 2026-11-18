@@ -12,7 +12,14 @@ set -euxo pipefail
 mkdir -p "$RUN_DIR"
 export RAY_TMPDIR="$PRL_SCRATCH/ray_tmp"  # /tmp/ray may belong to another user on shared nodes
 # No PYTORCH_CUDA_ALLOC_CONF=expandable_segments: Miles TorchMemorySaver (colocate offload) rejects it.
-export PYTHONUNBUFFERED=1 no_proxy=127.0.0.1,localhost CUDA_DEVICE_MAX_CONNECTIONS=1
+export PYTHONUNBUFFERED=1 CUDA_DEVICE_MAX_CONNECTIONS=1
+# Ray, the router and the session servers talk over this node's own addresses (the agent's model calls go to
+# http://<node address>:<port>): a site whose jobs reach the internet through a proxy (http(s)_proxy) must not send that
+# traffic there (a site's squid refused it, ERR_ACCESS_DENIED, and every trial aborted). The site's own entries stay.
+node_addrs=$( { hostname -I 2>/dev/null || python3 -c 'import socket; print(*socket.gethostbyname_ex(socket.gethostname())[2])' \
+  2>/dev/null || true; } | tr ' ' '\n' | sed '/^$/d' | paste -sd, -)
+export no_proxy=127.0.0.1,localhost,::1,$(uname -n)${node_addrs:+,$node_addrs}${no_proxy:+,$no_proxy}
+export NO_PROXY=$no_proxy
 # Ray kills workers at 95% node memory by default; colocated 4B on a GH200 node peaks near that (host offload).
 # On GH200 the GPU's HBM is exposed as a system NUMA node, so Ray's monitor counts GPU allocations as host
 # memory and OOM-kills the trainer at the first colocated train step (process RSS was only ~80 GB). Disabled

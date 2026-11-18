@@ -133,7 +133,7 @@ Every run trains Qwen3.5-9B on OpenThoughts-Agent-v1-RL and evaluates it on Open
 | PPO | (`ALGO=ppo`) | 54.84% |
 | **Reweight** | | |
 | ATLAS | `atlas` | 56.78% |
-| signed ATLAS | `atlas_signed` | 58.09% |
+| signed ATLAS | `atlas_signed` (`failed_good_weight=0`) | 58.09% |
 | **Rewrite** | | |
 | a teacher rewrites (the rewritten text is context only) | `rewrite` (`mask_new=True`) | 53.59% |
 | a teacher inserts a sentence into the thinking | | 54.03% |
@@ -150,13 +150,8 @@ Reweight, Rewrite and Reroll all train end to end in a full run; how best to use
 
 | Task | Requirements |
 |---|---|
-| write a function and try it on recorded trajectories (① ②) | Python ≥ 3.10 and `tokenizers`; the model's tokenizer (e.g. the `tokenizer.json` of Qwen/Qwen3.5-9B). If your function asks a model, a judge too (below) |
-| train and evaluate on a cluster (③) | GPU nodes; the Miles container image; an E2B-compatible sandbox service; the training / evaluation data and the model weights. Steps: [`docs/setup.md`](docs/setup.md) |
-
-**GPU**: any model; check `NUM_GPUS`, `PRL_GPU_MIN_MIB` and the memory settings in `configs/arms/common_ota_single_node.env`.
-
-**Sandboxes**: PRL works with any E2B-compatible service; its endpoint and key file are in the site profile (`E2B_API_URL`, `E2B_DOMAIN`,
-`E2B_API_KEY_FILE`).
+| write a function and try it on recorded trajectories (① ②) | Python ≥ 3.10; if your function asks a model, a judge (below) |
+| train and evaluate (③) | one node of 4 GPUs with ≥ 90 GB each and ≥ 768 GB of RAM, on a cluster or a single machine; an E2B-compatible sandbox service; set up once in 4 steps: [`docs/setup.md`](docs/setup.md) |
 
 **Judge / teacher** (the model `ask` calls): any OpenAI-compatible Chat Completions endpoint, set in the site profile (`configs/sites/<site>.env`, copied from `configs/sites/example.env`;
 all judge settings: `configs/arms/ota_judge.env`):
@@ -193,30 +188,36 @@ def my_transform(traj, **params):
 The repo ships 8 real training trajectories; your function runs on them (model calls included) and each decision is written to the output directory. From the repository root:
 
 ```bash
-PRL_TRANSFORM=my_transform MODEL_HF_DIR=<tokenizer or HF model dir> \
+python3 -m venv .venv && . .venv/bin/activate && pip install -e '.[check]'
+hf download Qwen/Qwen3.5-9B tokenizer.json --local-dir tokenizer   # the model's tokenizer
+PRL_TRANSFORM=my_transform MODEL_HF_DIR=tokenizer \
 PRL_TRANSFORM_CHECK_OUT=/tmp/check python -m prl.transforms.check
 ```
+
+A function that asks a model reads the judge settings from the environment here: `set -a; source configs/sites/<site>.env; set +a` first.
 
 Reading the result:
 
 - The terminal shows one line per trajectory: `[transform check] <trajectory>: reward <reward>, <steps> steps, <status>, trained tokens <before> -> <after>, <seconds> s`,
   where the status is `ok` or `skipped`. A last line `passed` means it passed; otherwise it prints `FAILED`, the trajectory and the reason.
 - The output directory has one subdirectory per trajectory: `transform.json` is the framework's record (each function's status and time, what you wrote into `traj.record`,
-  the trainable tokens before / after) and `transform_calls.json` every `ask` request and answer; `summary.json` sums up all 8.
+  the trainable tokens before / after) and `transform_calls.json` every `ask` request and answer (the ATLAS judge's: `atlas_labels.json`); `summary.json` sums up all 8.
 
-**③ Train and evaluate.**
+**③ Train and evaluate: one command.**
 
-One command on a set-up cluster submits training → export → TB-dev evaluation:
+On a set-up site, from the repository root:
 
 ```bash
-PRL_SITE=<site> CHAIN=train_eval ARM=ota_train_transform TRANSFORM=my_transform PRL_RUN_ID=my_run \
-  bash scripts/submit.sh
+PRL_SITE=<site> bash scripts/quickstart.sh                          # signed ATLAS
+PRL_SITE=<site> TRANSFORM=my_transform bash scripts/quickstart.sh   # your function
 ```
 
-- Parameters: `PRL_TRANSFORM_ARGS='{"other_weight": 0.3}'`
-- Algorithm: `ALGO=ppo` / `ALGO=reinforce_plus_plus`
-- Chains: `TRANSFORM=rewrite+atlas` (run in order; `+`, not a comma, because the submit commands split variables on commas)
-- The training job first runs your function on the recorded trajectories and does not start training if the function raises, times out or skips them all.
+- One job trains Qwen3.5-9B on OpenThoughts-Agent-v1-RL (68 updates) and evaluates it on TB-dev, about 15 h; the first run also prepares the model and runs a short framework smoke.
+- The default is signed ATLAS of the results (58.09%), with the judge gpt-6.1-sol at reasoning effort low (`PRL_JUDGE_EXTRA_BODY='{"reasoning_effort": "low"}'`).
+- Parameters: `PRL_TRANSFORM_ARGS='{"other_weight": 0.3}'`; algorithm: `ALGO=reinforce_plus_plus` (`ALGO=ppo` after its own smoke, [`CONTRIBUTING.md`](CONTRIBUTING.md)); chains: `TRANSFORM=rewrite+atlas` (run in order; `+`, not a comma, because the submit commands split variables on commas).
+- The job first runs your function on the recorded trajectories and does not start training if it raises, times out or skips them all.
+- Each update logs a line `step N: {'train/loss': ...}` in the run's `train.log` (`$PRL_EXT/runs/<run>/`); the TB-dev score is `eval/heldout` in the evaluation's. A job stopped by its time limit goes on when the same command is run again.
+- With only the smoke's 8 sandboxes built (docs/setup.md), try a transform on them: `PRL_SITE=<site> CHAIN=download+convert+smoke_grpo TRANSFORM=atlas bash scripts/submit.sh` (2 updates).
 
 ## Going further
 

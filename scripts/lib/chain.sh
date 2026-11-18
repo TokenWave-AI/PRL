@@ -1,14 +1,20 @@
-# A chain of steps in one batch job, shared by the scheduler wrappers scripts/pjm/job.sh (Fujitsu PJM) and
-# scripts/pbs/job.sh (PBS Pro). The chain steps (scripts/chain/*.sh) do the work with PRL_SITE set; a
-# one-node job may run 168 h on both sites, so a chain needs neither the 24 h relay nor dependent jobs. The wrapper
+# A chain of steps in one batch job, shared by the scheduler wrappers scripts/pjm/job.sh (Fujitsu PJM),
+# scripts/pbs/job.sh (PBS Pro) and scripts/local/job.sh (this machine, no scheduler). The chain steps
+# (scripts/chain/*.sh) do the work with PRL_SITE set; a one-node job may run 168 h, so a chain needs neither the 24 h
+# relay nor dependent jobs. The wrapper
 # sets PRL_ROOT, PRL_SITE, JOB_ID and sources configs/sites/$PRL_SITE.env, then calls run_chain. Submit through the
 # site's submit.sh (scripts/lib/submit_chain.sh builds the variables).
 # PRL_CHAIN is one step or several joined by "+" (e.g. download+convert+smoke+train_eval), run in order:
+#   prepare      once per site: the Miles image when MILES_IMAGE is missing (PRL_MILES_IMAGE_SOURCE, default
+#                docker://radixark/miles:v0.1.2), Harbor and its dependencies for the container
+#                (scripts/setup/install_harbor_deps.sh) and the tasks (scripts/setup/prepare_otagent.sh); each skips
+#                what is there
 #   download     MODEL's weights into $HF_HOME/hub (scripts/setup/download_model.sh; hf skips what is there)
 #   convert      once per model: container check, then the torch_dist base checkpoint; skipped when it exists
 #   smoke        plain framework smoke for this job's model and context (SMOKE_ARM, e.g. ota_train_smoke_moe)
 #                + its acceptance; skipped when an accepted smoke already vouches for these sources, MODEL and ARM's
-#                context (scripts/checks/find_smoke.py)
+#                context (scripts/checks/find_smoke.py). Both smokes first check their 8 tasks' templates (oracle /
+#                no-op) when the snapshot has no such result yet (smoke_contract)
 #   smoke_grpo   framework smoke of a transform (ARM=ota_train_smoke_transform, TRANSFORM=...) + acceptance
 #   smoke_ppo    the same with ALGO=ppo: job A (2 rollouts), job B (resume, 3 rollouts), acceptance
 #   train_eval   grpo_full.sh on RUN_DIR (resumes what is there); once the last iteration is saved, the
@@ -18,7 +24,8 @@
 #   eval_hf      TB-dev 70x8 of an exported checkpoint (MODEL_HF_DIR, from train_eval's export) with EVAL_ARM: a
 #                re-evaluation without the training (e.g. when the training job's own evaluation lost trials)
 #   task_check   oracle / nop Harbor trials on prebuilt task templates (PRL_TEMPLATE_MANIFEST, PRL_TASK_ROOT;
-#                scripts/chain/task_smoke.sh): before a new template snapshot is used
+#                scripts/chain/task_smoke.sh): before a new template snapshot is used. Without them: the framework
+#                smoke's 8 tasks into <training snapshot>/contract, as the smokes do first (smoke_contract)
 #   unit         the unit tests in the Miles image
 #   replay       train-only checks and failure drills on an accepted smoke's batches (PRL_REPLAY_SOURCE, its
 #                RUN_DIR; scripts/chain/replay_check.sh): resume, data parallelism, longest sample, NaN, kills
@@ -115,19 +122,41 @@ start_workers() {
 
 T=scripts/chain
 EVAL_ARM=${EVAL_ARM:-ota_eval_tbdev70_64k_summary_c16_noturncap}
+
+# smoke_contract ARM: the smoke's preflight needs the oracle / no-op results of its 8 tasks on their templates
+# (<snapshot>/contract, scripts/chain/task_smoke.sh); a snapshot without them gets them first. They are written to a
+# temporary directory and moved into place only when every task passed, so a failed check is rerun next time.
+smoke_contract() {
+  local manifest contract
+  manifest=$(arm_setting PRL_TEMPLATE_MANIFEST "$1"); contract=$(dirname "$manifest")/contract
+  if [ -d "$contract" ]; then echo "[$PRL_SITE] $contract: the smoke's tasks are checked already"; return 0; fi
+  echo "[$PRL_SITE] $contract missing: oracle / no-op trials of the smoke's tasks first"
+  rm -rf "$contract.partial"
+  PRL_TEMPLATE_MANIFEST=$manifest PRL_TASK_ROOT=$(arm_setting HARBOR_TASKS_DIR "$1") \
+    PRL_TASK_PROMPTS=$(arm_setting PROMPT_DATA "$1") PRL_TASK_CHECK_OUTPUT=$contract.partial bash $T/task_smoke.sh
+  mv "$contract.partial" "$contract"
+}
 run_step() {
   case $1 in
+  prepare)  # once per site, on a node with internet: the Miles image when MILES_IMAGE is missing (mksquashfs needs
+    # ~74 GB of RAM, so not on a login node), Harbor, the e2b SDK and litellm for the container (skipped when
+    # installed), then the tasks as Harbor dirs and prompt rows (prepare_otagent.sh skips what is there)
+    if [ ! -e "$MILES_IMAGE" ]; then
+      local partial=${MILES_IMAGE%.sif}.partial.sif
+      mkdir -p "$(dirname "$MILES_IMAGE")" "$PRL_SCRATCH/pull_tmp" "$PRL_SCRATCH/pull_cache"; rm -f "$partial"
+      echo "[$PRL_SITE] pulling ${PRL_MILES_IMAGE_SOURCE:=docker://radixark/miles:v0.1.2} to $MILES_IMAGE"
+      APPTAINER_TMPDIR=$PRL_SCRATCH/pull_tmp APPTAINER_CACHEDIR=$PRL_SCRATCH/pull_cache \
+        apptainer pull "$partial" "$PRL_MILES_IMAGE_SOURCE"
+      mv "$partial" "$MILES_IMAGE"; rm -rf "$PRL_SCRATCH/pull_tmp" "$PRL_SCRATCH/pull_cache"
+    fi
+    sandbox
+    bash scripts/setup/install_harbor_deps.sh
+    MODELS= bash scripts/setup/prepare_otagent.sh ;;
   download)
     sandbox
     ( exec 8>"$PRL_EXT/locks/model_$MODEL.lock"; flock 8
       DATASET=otagent bash scripts/setup/download_model.sh | tail -3 ) ;;
   convert)  # the container with in_miles' flags, then HF -> torch_dist (scripts/setup/convert_ckpt.sh)
-    # An image copied from another site in two byte ranges (Docker Hub no longer has the tag): join them once
-    if [ ! -f "$MILES_IMAGE" ] && [ -f "$PRL_EXT/sif/parts/part2" ]; then
-      cat "$PRL_EXT/sif/parts/part1" "$PRL_EXT/sif/parts/part2" > "$MILES_IMAGE.partial"
-      [ "$(stat -c %s "$MILES_IMAGE.partial")" = 17678413824 ] || { echo "joined image has the wrong size" >&2; exit 1; }
-      mv "$MILES_IMAGE.partial" "$MILES_IMAGE" && rm -r "$PRL_EXT/sif/parts"
-    fi
     sandbox
     ( exec 8>"$PRL_EXT/locks/model_$MODEL.lock"; flock 8
       export DATASET=${DATASET:-otagent}   # env.sh sources a dataset preset; the conversion does not depend on which
@@ -146,11 +175,13 @@ run_step() {
     [ -z "${ARM:-}" ] || [ "$(arm_setting MAX_CONTEXT "$SMOKE_ARM")" = "$(arm_setting MAX_CONTEXT)" ] ||
       { echo "SMOKE_ARM=$SMOKE_ARM and ARM=$ARM have different contexts" >&2; exit 1; }
     sandbox
+    smoke_contract "$SMOKE_ARM"
     start_workers "$SMOKE_ARM"
     env -u TRANSFORM ARM="$SMOKE_ARM" bash $T/grpo_smoke.sh
     PRL_SMOKE_JOB=$JOB_ID PRL_SMOKE_RUN=$(arm_setting RUN_DIR "$SMOKE_ARM") bash $T/grpo_acceptance.sh ;;
   smoke_grpo)
     sandbox
+    smoke_contract "$ARM"
     start_workers "$ARM"
     bash $T/grpo_smoke.sh
     PRL_SMOKE_JOB=$JOB_ID bash $T/grpo_acceptance.sh ;;
@@ -191,9 +222,9 @@ run_step() {
   replay)  # train-only checks and failure drills (PRL_REPLAY_SOURCE: an accepted smoke's RUN_DIR; default this
     sandbox  # job's smoke_grpo run)
     PRL_REPLAY_SOURCE=${PRL_REPLAY_SOURCE:-$(arm_setting RUN_DIR)} bash $T/replay_check.sh ;;
-  task_check)  # oracle / nop trials on a template snapshot (PRL_TEMPLATE_MANIFEST, PRL_TASK_ROOT)
+  task_check)  # oracle / nop trials on a template snapshot (PRL_TEMPLATE_MANIFEST, PRL_TASK_ROOT), or the smoke's tasks
     sandbox
-    bash $T/task_smoke.sh ;;
+    if [ -n "${PRL_TEMPLATE_MANIFEST:-}" ]; then bash $T/task_smoke.sh; else smoke_contract ota_train_smoke; fi ;;
   raydebug)  # Ray head start as container_main.sh does it, with its logs kept under $PRL_EXT/raydebug_<job>
     sandbox
     export DATASET=otagent HARNESS=harbor

@@ -26,7 +26,10 @@ mkdir -p "$RUN_DIR" "$PRL_SCRATCH"
 source "$PRL_ROOT/scripts/lib/guard.sh"
 hardware_gate
 CONTAINER_PYTHONPATH="$PRL_ROOT:$PRL_ROOT/build/miles:$PRL_ROOT/build/miles/examples/experimental/harbor:$PRL_EXT/pydeps_miles:$PRL_EXT/pydeps_e2b_sdk:$PRL_EXT/pydeps_harbor:/root/Megatron-LM"
-apptainer exec --nv -B "$PRL_ROOT" -B "$PRL_EXT" \
+# as the training container (scripts/lib/env.sh in_miles): the repo, PRL_EXT and PRL_EXTRA_BINDS (e.g. where the key
+# files are)
+binds=(-B "$PRL_ROOT" -B "$PRL_EXT"); for d in ${PRL_EXTRA_BINDS:-}; do if [ -e "$d" ]; then binds+=(-B "$d"); fi; done
+apptainer exec --nv "${binds[@]}" \
   --env "PYTHONPATH=$CONTAINER_PYTHONPATH" \
   "$MILES_IMAGE" /opt/sglang/bin/python3 "$PRL_ROOT/scripts/checks/grpo_preflight.py"
 # A trajectory transform (ARM=ota_train_smoke_transform, TRANSFORM=<name>) runs on recorded trials first,

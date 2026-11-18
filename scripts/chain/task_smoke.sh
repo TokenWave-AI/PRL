@@ -22,7 +22,10 @@ set +a
 export PRL_TASK_CHECK_OUTPUT=${PRL_TASK_CHECK_OUTPUT:-$PRL_EXT/task_checks/${JOB_ID:-$$}}
 export LITELLM_LOCAL_MODEL_COST_MAP=True HARBOR_TELEMETRY=0
 unset E2B_API_KEY E2B_SANDBOX_URL
-apptainer exec -B "$PRL_ROOT" -B "$PRL_EXT" \
+# as the training container (scripts/lib/env.sh in_miles): the repo, PRL_EXT and PRL_EXTRA_BINDS (e.g. where the key
+# files are)
+binds=(-B "$PRL_ROOT" -B "$PRL_EXT"); for d in ${PRL_EXTRA_BINDS:-}; do if [ -e "$d" ]; then binds+=(-B "$d"); fi; done
+apptainer exec "${binds[@]}" \
   --env "PYTHONPATH=$PRL_ROOT:${PRL_EXTRA_PYTHONPATH:-}:$PRL_EXT/pydeps_harbor" \
   --env "E2B_API_KEY_FILE=$E2B_API_KEY_FILE,E2B_API_URL=$E2B_API_URL,E2B_DOMAIN=$E2B_DOMAIN" \
   --env "PRL_TEMPLATE_MANIFEST=$manifest,PRL_TASK_ROOT=$tasks,PRL_TASK_PROMPTS=${PRL_TASK_PROMPTS:-}" \

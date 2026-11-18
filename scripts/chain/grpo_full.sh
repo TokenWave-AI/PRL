@@ -74,8 +74,13 @@ assert len(train) == len(set(train)) == 728
 assert len(evaluation) == len(set(evaluation)) == 70
 assert not set(train).intersection(evaluation)
 manifest = os.environ['PRL_TEMPLATE_MANIFEST']
-assert set(json.loads(Path(manifest).read_text())['tasks']) == set(train + evaluation)
-for task in train + evaluation:
+# Every training task (and the tasks of an evaluation during training, EVAL_DATA) has a ready template in the training
+# snapshot; TB-dev's are the evaluation snapshot's
+needed = train + (tasks(os.environ['EVAL_DATA']) if os.environ.get('EVAL_DATA') else [])
+missing = sorted(set(needed) - set(json.loads(Path(manifest).read_text())['tasks']))
+assert not missing, (f'{len(missing)} tasks have no template in {manifest}, e.g. {missing[:3]}: '
+                     'build them with scripts/setup/build_sandboxes.sh (docs/sandboxes.md)')
+for task in needed:
     resolve_template(manifest, Path(os.environ['HARBOR_TASKS_DIR']) / task, os.environ['E2B_API_URL'])
 # The trainer computes the sampled tokens' log-probs at temperature 1 over the full vocabulary: other sampling settings
 # would make the train/rollout log-prob comparison (and the importance ratios) wrong without an error

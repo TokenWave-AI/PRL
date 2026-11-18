@@ -3,103 +3,50 @@
 Every trial runs in its own [E2B](https://e2b.dev) sandbox, created from a template prebuilt for its task. Harbor's
 `E2BEnvironment` talks to the sandbox service through the e2b SDK, so nothing here is tied to one E2B-compatible
 service; its endpoint and key file are in the site profile (`E2B_API_URL`, `E2B_DOMAIN`, `E2B_API_KEY_FILE`;
-`configs/sites/example.env`).
+`configs/sites/example.env`). A template belongs to one account and one region: a new account, or a new region, needs
+its own templates.
 
-A template belongs to one account and one region. A new account, or a new region, needs its own templates and its own
-manifest.
+## One command
 
-## What you need
-
-- An account on the sandbox service and an API key, saved as the file `E2B_API_KEY_FILE`
-  names (chmod 600).
-- A container registry the service can pull from, and its credentials (kept outside the repo).
-- A machine with Docker and `sudo` for the builds (`linux/amd64`), with the task directories
-  (`scripts/setup/prepare_otagent.sh` downloads them).
-- Python with `e2b==2.50.0` and `pyqwest==0.10.0` for the registration (the versions the templates were checked with;
-  `scripts/setup/install_harbor_deps.sh` installs the same SDK for the jobs).
-
-## 0. Make a snapshot
-
-The arms run on task snapshots: a directory per task set that holds the task directories its templates were built
-from, the manifest of those templates and the oracle / no-op results. One for training, one for evaluation:
+On a linux/amd64 machine with Docker (buildx), `sudo`, internet and Python ≥ 3.10, from the repository root:
 
 ```bash
-python3 scripts/tools/make_task_snapshot.py --tasks-dir $PRL_EXT/data/harbor_tasks \
-  --rows $PRL_EXT/data/otagent_rl/train.jsonl --out $PRL_EXT/task_snapshots/otagent728 --tmux --smoke 8
-python3 scripts/tools/make_task_snapshot.py --tasks-dir $PRL_EXT/data/harbor_tasks \
-  --rows $PRL_EXT/data/ot_tbdev/tbdev.jsonl --out $PRL_EXT/task_snapshots/tbdev70 --tmux
+PRL_SITE=<site> bash scripts/setup/build_sandboxes.sh
 ```
 
-Those are the default locations (`PRL_TRAIN_SNAPSHOT`, `PRL_EVAL_SNAPSHOT` in `configs/arms/common_ota.env`; a
-site profile may set others). `--tmux` adds an `apt-get install tmux` layer to every task image that lacks it: Terminus-2
-drives the shell through tmux, and installing it at the start of each trial costs about 10 s and loses the trial when
-the install fails. `--smoke 8` writes the framework smoke's prompts (`smoke.jsonl`). A snapshot is never changed once
-its templates are built; a new task set or a new image gets a new directory.
+Besides the sandbox endpoint, it reads from the site profile the registry the images go to (`PRL_REGISTRY`) and the
+credentials the service pulls them with (`PRL_REGISTRY_CREDENTIALS_FILE`, `{"username": ..., "password": ...}`,
+chmod 600). The script calls `sudo docker`, so log root's Docker in to that registry (`sudo docker login
+--password-stdin`), or set `PRL_DOCKER_COMMAND="sudo docker --config <dir>"` for a Docker config logged in elsewhere.
+On another machine than the cluster, set `PRL_EXT` to a directory there, with the key files where the profile names them
+(or set `E2B_API_KEY_FILE` and `PRL_REGISTRY_CREDENTIALS_FILE` too), and copy `$PRL_EXT/task_snapshots` to the cluster's
+`PRL_EXT` afterwards. `PRL_SANDBOX_SMOKE_ONLY=1` builds only the 8 tasks of the framework smoke (a few minutes; all 798
+take hours). It stops at the first task that fails; run it again to go on with the tasks that have no template yet.
+Docker keeps its build cache (`docker builder prune` frees it).
 
-## 1. Build the images
+What it does, with the tools it calls (each usable alone):
 
-```bash
-PRL_IMAGE_TASK_ROOT=$S/tasks \
-PRL_IMAGE_TASKS=<task>,<task>,... \
-PRL_IMAGE_OUTPUT=<new empty directory> \
-PRL_DOCKER_COMMAND='sudo docker' \
-python3 scripts/tools/prebuild_task_images.py
-```
+1. The tasks (`scripts/setup/prepare_otagent.sh`), when `$PRL_EXT/data` lacks them.
+2. Two **snapshots**, `$PRL_EXT/task_snapshots/otagent728` (training, with the smoke's 8 prompts in `smoke.jsonl`) and
+   `tbdev70` (`scripts/tools/make_task_snapshot.py`): copies of the task directories the templates are built from. The
+   training tasks' solutions and tests write to `/output`, which their images lack: `--output-dir` adds it. The arms
+   read the snapshots as `PRL_TRAIN_SNAPSHOT` and `PRL_EVAL_SNAPSHOT` (`configs/arms/common_ota.env`; a site profile
+   may name others). `--tmux` adds a tmux layer to every task image that lacks it: Terminus-2 drives the shell through
+   tmux, and installing it at the start of each trial costs about 10 s and loses the trial when the install fails.
+3. An **image** per task from its `environment/` directory (`scripts/tools/prebuild_task_images.py`: linux/amd64, no
+   provenance or SBOM attestation; tests and solutions are uploaded by Harbor per trial, not baked in).
+4. The image **pushed** and a **template** built from it on the sandbox service, 2 CPUs and 2 GB
+   (`scripts/tools/register_templates.py`), batch by batch, the local images removed after each batch.
+5. Each snapshot's **`manifest.json`**: task → ready template and the context hash of the task's `environment/`.
 
-Only each task's `environment/` directory is sent to Docker (`--platform linux/amd64 --provenance=false --sbom=false`:
-a plain single-platform image); tests and solutions are uploaded by Harbor per trial and are not baked in. The output directory gets a
-`manifest.json` with one row per task: the local image tag, the context hash of `environment/`, the resolved base-image
-digests and the build log. A failed build stops the batch, so that no task silently drops out of an evaluation.
+A snapshot is never changed once its templates are built: before a sandbox is created, `prl/sandbox/template_manifest.py`
+checks that the manifest belongs to the configured `E2B_API_URL`, that the task's row is ready, and that the task's
+`environment/` still has the hash it was built from. A new task set or a changed image gets a new snapshot directory.
 
-## 2. Push and register
+## Checks
 
-For each task in that manifest: tag the image for your registry, push it, and build a template from it. The
-template build is synchronous; mark a row ready only after it returned.
-
-```python
-import json, os, subprocess, time
-from pathlib import Path
-from e2b import Template, default_build_logger
-
-path = Path(os.environ["BUILD_MANIFEST"])            # the manifest.json of step 1
-manifest = json.loads(path.read_text())
-task = os.environ["TASK"]
-row = manifest["tasks"][task]
-creds = json.loads(Path(os.environ["REGISTRY_CREDENTIALS_FILE"]).read_text())   # {"username": ..., "password": ...}
-image = f"{os.environ['REGISTRY']}/{task}:{manifest['run_id'].lower()}"      # e.g. registry.example.com/project
-subprocess.run(["sudo", "docker", "tag", row["image_tag"], image], check=True)
-subprocess.run(["sudo", "docker", "push", image], check=True)
-
-api_url, domain = os.environ["E2B_API_URL"], os.environ["E2B_DOMAIN"]           # the site profile's
-build = Template.build(
-    Template().from_image(image, username=creds["username"], password=creds["password"]),
-    name=f"task-{task}-{int(time.time())}", cpu_count=2, memory_mb=2048,
-    on_build_logs=default_build_logger(),
-    api_key=Path(os.environ["E2B_API_KEY_FILE"]).read_text().strip(), api_url=api_url, domain=domain,
-)
-row.update(status="ready", template_id=build.template_id, build_id=build.build_id, registry_image=image)
-manifest.update(api_url=api_url, domain=domain)
-path.write_text(json.dumps(manifest, indent=2) + "\n")
-```
-
-Log in to the registry with `docker login --password-stdin` and keep the Docker config outside the repo. The template
-fixes the sandbox's resources (2 CPU, 2 GB here); `HARBOR_OVERRIDE_CPUS` / `HARBOR_OVERRIDE_MEMORY_MB` in
-`configs/arms/common_ota.env` only record the same values for Harbor.
-
-## 3. Put the manifest into the snapshot
-
-Copy the registered manifest to `$S/manifest.json` (`$S` = the snapshot): the training arms read
-`$PRL_TRAIN_SNAPSHOT/manifest.json`, the evaluation arm `$PRL_EVAL_SNAPSHOT/manifest.json`. Before a sandbox is
-created,
-`prl/sandbox/template_manifest.py` checks that the manifest belongs to the configured `E2B_API_URL`, that the task's
-row is `ready`, and that the task's `environment/` still has the context hash it was built from; a changed task
-directory fails there, and needs a rebuild.
-
-## 4. Check them
-
-- `python3 scripts/checks/sandbox_smoke.py`: the sandbox contract Harbor relies on (files, exec, tmux), without
-  a model.
-- `CHAIN=task_check PRL_TEMPLATE_MANIFEST=$S/manifest.json PRL_TASK_ROOT=$S/tasks PRL_TASK_CHECK_OUTPUT=$S/contract
-  bash scripts/submit.sh`: each task's official oracle must score 1 and a no-op agent 0 on its template
-  (`scripts/chain/task_smoke.sh`). The framework smoke's preflight requires these results for its 8 tasks
-  (`PRL_TASK_PROMPTS=$S/smoke.jsonl` checks only those).
+- `python3 scripts/checks/sandbox_smoke.py`: the sandbox contract Harbor relies on (files, exec, tmux), without a model.
+- The official solution must score 1 and a no-op agent 0 on each task's template (`scripts/chain/task_smoke.sh`). For the
+  smoke's 8 tasks, into `<training snapshot>/contract`: `PRL_SITE=<site> CHAIN=task_check bash scripts/submit.sh` (the
+  first framework smoke does it by itself when it was not done); for a whole snapshot:
+  `PRL_SITE=<site> CHAIN=task_check PRL_TEMPLATE_MANIFEST=$S/manifest.json PRL_TASK_ROOT=$S/tasks bash scripts/submit.sh`.

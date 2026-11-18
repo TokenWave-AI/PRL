@@ -7,7 +7,8 @@ __pycache__/
 /CLAUDE.md
 /AGENTS.md
 /.claude/
-# Local environments, keys, container images
+# Local environments, keys, container images; the tokenizer of the Quick start's ②
+/tokenizer/
 .venv*/
 .env
 .env.*

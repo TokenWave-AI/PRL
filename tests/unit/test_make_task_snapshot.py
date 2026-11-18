@@ -58,3 +58,25 @@ def test_a_task_without_its_directory_stops(tmp_path: Path) -> None:
     (tmp_path / "rows.jsonl").write_text(json.dumps({"prompt": "p", "metadata": {"instance_id": "gone"}}) + "\n")
     done = _run(tmp_path, "--out", str(tmp_path / "snap"))
     assert done.returncode != 0 and "gone" in done.stderr and not (tmp_path / "snap").exists()
+
+
+def test_output_dir_only_where_the_tests_use_it(tmp_path: Path) -> None:
+    all_tasks = tmp_path / "all"
+    _task(all_tasks, "writes", "FROM ubuntu:24.04\nWORKDIR /workspace\n")
+    (all_tasks / "writes" / "tests" / "test.sh").write_text('OUTPUT="/output/command_capture.txt"\n')
+    _task(all_tasks, "as_user", "FROM ubuntu:24.04\nUSER agent\n")
+    (all_tasks / "as_user" / "tests" / "test.sh").write_text("cat /output/x\n")
+    _task(all_tasks, "has_it", "FROM ubuntu:24.04\nRUN mkdir -p /output\n")
+    (all_tasks / "has_it" / "tests" / "test.sh").write_text("cat /output/x\n")
+    _task(all_tasks, "no_output", "FROM ubuntu:24.04\n")
+    names = ["writes", "as_user", "has_it", "no_output"]
+    (tmp_path / "rows.jsonl").write_text("".join(json.dumps({"prompt": n, "metadata": {"instance_id": n}}) + "\n"
+                                                 for n in names))
+    done = _run(tmp_path, "--out", str(tmp_path / "snap"), "--output-dir", "--tmux")
+    assert done.returncode == 0, done.stderr
+    assert "/output added to 2, tmux added to 4" in done.stdout
+    dockerfile = {n: (tmp_path / "snap" / "tasks" / n / "environment" / "Dockerfile").read_text() for n in names}
+    assert dockerfile["writes"].index("RUN mkdir -p /output") < dockerfile["writes"].index("tmux")  # mkdir first
+    assert "USER root\nRUN mkdir -p /output\nUSER agent\n" in dockerfile["as_user"]
+    assert dockerfile["as_user"].endswith("USER agent\n")
+    assert dockerfile["has_it"].count("/output") == 1 and "mkdir -p /output" not in dockerfile["no_output"]

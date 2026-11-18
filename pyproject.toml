@@ -13,8 +13,8 @@ dependencies = ["pyyaml"]
 [project.optional-dependencies]
 # ruff pinned: its default rule set changes between versions (tests/unit/test_repo_checks.py runs it)
 dev = ["pytest", "ruff==0.17.0"]
-# The no-GPU trial of a transform on recorded trajectories (python -m prl.transforms.check)
-check = ["tokenizers"]
+# The no-GPU trial of a transform on recorded trajectories (python -m prl.transforms.check); httpx: the judge calls
+check = ["tokenizers", "httpx"]
 
 [tool.setuptools.packages.find]
 where = ["."]

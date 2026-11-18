@@ -4,7 +4,7 @@ The vendored trees are kept **byte-identical to upstream**:
 
 | Vendored dir | Upstream | Pinned commit | Notes |
 |---|---|---|---|
-| `third_party/miles/` | https://github.com/radixark/miles (fork of THUDM/slime) | `49576fd` (2026-10-02) | Same commit baked into the container `radixark/miles:dev-202610022330` (CUDA 13, needs host driver ≥ 580) |
+| `third_party/miles/` | https://github.com/radixark/miles (fork of THUDM/slime) | `49576fd` (2026-10-02) | Runs from `build/miles` in the container `radixark/miles:v0.1.2` (amd64 and arm64; CUDA 13, needs host driver ≥ 580), which provides the environment (SGLang, Megatron-LM, torch) |
 
 All our changes live here as `git format-patch` files, one change per patch; the rationale is in the commit message or in the patch's `# prl:` comments:
 

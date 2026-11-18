@@ -119,7 +119,7 @@ def main() -> None:
     tasks = [row["metadata"]["instance_id"] for row in rows]
     manifest_path = os.environ["PRL_TEMPLATE_MANIFEST"]
     assert len(tasks) == len(set(tasks)) == 8
-    # the training snapshot's manifest (configs/arms/ota_train_smoke.env): the smoke's 8 tasks among its 798
+    # the training snapshot's manifest (configs/arms/ota_train_smoke.env): the smoke's 8 tasks among its 728
     assert set(tasks) <= set(json.loads(Path(manifest_path).read_text())["tasks"])
     for task in tasks:
         resolve_template(manifest_path, Path(os.environ["HARBOR_TASKS_DIR"]) / task, os.environ["E2B_API_URL"])

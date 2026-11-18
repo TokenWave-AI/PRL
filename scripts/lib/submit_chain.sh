@@ -1,22 +1,23 @@
 # The variables of a chain job (scripts/lib/chain.sh), shared by the scheduler wrappers scripts/pjm/submit.sh and
 # scripts/pbs/submit.sh. Sourced from the repo root after configs/sites/$PRL_SITE.env and scripts/lib/chain.sh; reads
 # CHAIN, MODEL, ALGO, ARM, SMOKE_ARM, EVAL_ARM, MODEL_HF_DIR, TRANSFORM, PRL_TRANSFORM_ARGS, PRL_RUN_ID,
-# PRL_TEMPLATE_MANIFEST + PRL_TASK_ROOT [+ PRL_TASK_PROMPTS, PRL_TASK_CHECK_OUTPUT] (task_check),
+# PRL_TEMPLATE_MANIFEST + PRL_TASK_ROOT [+ PRL_TASK_PROMPTS, PRL_TASK_CHECK_OUTPUT] (task_check; none: the smoke's tasks),
 # PRL_REPLAY_SOURCE (replay),
 # ELAPSE, RAYDEBUG_ARGS and sets vars (VAR=value,... for pjsub -x / qsub -v), elapse, nodes (the arms' NNODES) and record (the
 # submission's record dir).
 # submit_job COMMAND... runs the scheduler command, or prints it with DRY_RUN=1, and records it.
-CHAIN=${CHAIN:?one step or several joined by +: unit download convert smoke smoke_grpo smoke_ppo train_eval eval_base eval_hf task_check replay raydebug}
+CHAIN=${CHAIN:?one step or several joined by +: prepare unit download convert smoke smoke_grpo smoke_ppo train_eval eval_base eval_hf task_check replay raydebug}
 export ALGO=${ALGO:-grpo} MODEL=${MODEL:-qwen3.5-9B}
 steps=" ${CHAIN//+/ } "
 has() { [[ $steps == *" $1 "* ]]; }
 for s in $steps; do
-  case $s in unit|download|convert|smoke|smoke_grpo|smoke_ppo|train_eval|eval_base|eval_hf|task_check|replay|raydebug) ;;
+  case $s in prepare|unit|download|convert|smoke|smoke_grpo|smoke_ppo|train_eval|eval_base|eval_hf|task_check|replay|raydebug) ;;
     *) echo "unknown step $s" >&2; exit 1 ;; esac
 done
-rest=${steps/ unit / }; rest=${rest/ task_check / }; rest=${rest/ replay / }
+rest=${steps/ unit / }; rest=${rest/ task_check / }; rest=${rest/ replay / }; rest=${rest/ prepare / }
+rest=${rest/ download / }; rest=${rest/ convert / }
 if { has smoke_grpo || has smoke_ppo; } && [ "$(wc -w <<< "$rest")" != 1 ]; then
-  echo "smoke_grpo and smoke_ppo run alone, or with unit, task_check and replay (they set ARM to the transform smoke)" >&2; exit 1
+  echo "smoke_grpo and smoke_ppo run alone, or with prepare, download, convert, unit, task_check and replay (they set ARM to the transform smoke)" >&2; exit 1
 fi
 vars=PRL_SITE=$PRL_SITE,PRL_CHAIN=$CHAIN,MODEL=$MODEL
 # relay overrides of a resubmitted training chain (scripts/lib/relay.sh)
@@ -25,6 +26,7 @@ for v in PRL_RELAY_RESET PRL_RESUME_DATA_FROM_PREVIOUS; do [ -n "${!v:-}" ] && v
 # reads both)
 [[ "${TRANSFORM:-}" != *,* ]] || { echo "TRANSFORM=$TRANSFORM: write a chain as ${TRANSFORM//,/+}" >&2; exit 1; }
 elapse=02:00:00
+if has prepare; then elapse=04:00:00; fi  # the Harbor clone and the dataset download
 record=$PRL_EXT/submissions/${PRL_SITE}_${CHAIN//+/_}_${MODEL}_$(date -u +%Y%m%d%H%M)
 [ -n "${RAYDEBUG_ARGS:-}" ] && vars=$vars,RAYDEBUG_ARGS=$RAYDEBUG_ARGS
 [ -n "${PRL_ARCHIVE_TRIALS:-}" ] && vars=$vars,PRL_ARCHIVE_TRIALS=$PRL_ARCHIVE_TRIALS  # 0: keep trial directories (chain.sh)
@@ -47,7 +49,7 @@ if has eval_base || has train_eval || has eval_hf; then
   [ -n "${EVAL_ARM:-}" ] && vars=$vars,EVAL_ARM=$EVAL_ARM
   elapse=08:00:00
 fi
-if has task_check; then
+if has task_check && [ -n "${PRL_TEMPLATE_MANIFEST:-}${PRL_TASK_ROOT:-}" ]; then  # neither: the smoke's 8 tasks (chain.sh)
   vars=$vars,PRL_TEMPLATE_MANIFEST=${PRL_TEMPLATE_MANIFEST:?task_check checks PRL_TEMPLATE_MANIFEST}
   vars=$vars,PRL_TASK_ROOT=${PRL_TASK_ROOT:?task_check needs PRL_TASK_ROOT, its task snapshot}
   # only a prompt file's tasks, written where the smoke preflight looks (scripts/chain/task_smoke.sh)
@@ -71,7 +73,8 @@ if has train_eval; then
       { echo "SMOKE_ARM=$SMOKE_ARM and ARM=$ARM have different contexts" >&2; exit 1; }
   elif [ "${PRL_SUBMIT_FINDS_SMOKE:-1}" = 1 ]; then  # else the job looks (the login node cannot run the host Python)
     smoke=$(find_smoke)
-    [ -n "$smoke" ] || { echo "no accepted $ALGO smoke for these sources, $MODEL at ARM's context: add a smoke step" >&2; exit 1; }
+    [ -n "$smoke" ] || { echo "no accepted $ALGO smoke for these sources, $MODEL at ARM's context: add a smoke step$(
+      [ "$ALGO" = ppo ] && echo " (PPO: CHAIN=smoke_ppo first, CONTRIBUTING.md)")" >&2; exit 1; }
     vars=$vars,PRL_SMOKE_RUN=$smoke
   fi
   if [ -n "${TRANSFORM:-}" ]; then

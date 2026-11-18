@@ -15,10 +15,11 @@ cd "$PRL_ROOT"; source scripts/lib/env.sh
 mkdir -p "$PRL_SCRATCH"
 MODELS=${MODELS-Qwen/Qwen3.5-9B}            # space-separated HF ids; MODELS= skips
 D=$PRL_EXT/data; mkdir -p "$D"
-# Python for hf download / parquet extraction: the Miles container (has hf, pyarrow) when its SIF exists, else PREP_PYTHON.
-if [ -f "$MILES_IMAGE" ]; then run_py() { in_miles bash -c "cd $PRL_ROOT && $*"; }; HF=hf
+# Python for hf download / parquet extraction: the Miles container (has hf, pyarrow) when its image exists (a SIF, or
+# the directory the chain steps unpack it to), else PREP_PYTHON.
+if [ -e "$MILES_IMAGE" ]; then run_py() { in_miles bash -c "cd $PRL_ROOT && $*"; }; HF=hf
 else run_py() { bash -c "cd $PRL_ROOT && $*"; }; HF=${HF_CLI:-hf}; fi   # e.g. HF_CLI=<venv>/bin/hf
-PY=${PREP_PYTHON:-python3}; [ -f "$MILES_IMAGE" ] && PY=python3
+PY=${PREP_PYTHON:-python3}; [ -e "$MILES_IMAGE" ] && PY=python3
 echo "== 1. weights -> $HF_HOME/hub"
 for m in $MODELS; do
   if ls -d "$HF_HOME/hub/models--${m//\//--}"/snapshots/*/config.json >/dev/null 2>&1; then echo "   $m present"; else

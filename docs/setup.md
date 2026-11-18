@@ -1,43 +1,44 @@
-# Setting up a cluster
+# Setting up a site
 
-Everything below is done once per cluster. A ready site needs the following:
+A site is a cluster, or a single machine, that runs PRL. Set it up once; then `bash scripts/quickstart.sh` trains and
+evaluates (README, Quick start ③).
 
-- GPU nodes that run the Miles container, with Apptainer ≥ 1.4 or SingularityCE. Any GPU model: set `NUM_GPUS`,
-  `PRL_GPU_MIN_MIB` and the memory settings in `configs/arms/common_ota_single_node.env` to match your nodes. Compute
-  nodes need outbound internet to reach the sandboxes and any model API.
-- An E2B-compatible sandbox service (anything the e2b SDK can talk to), its API key, and one template per task.
-  Templates belong to an account, so a new account needs its own.
-- A machine with Docker and sudo to build the task images.
-- Optional: an OpenAI-compatible model API for transforms that ask a model.
+What a site needs:
 
-Steps (launchers exist for Fujitsu PJM, `scripts/pjm/`, and PBS Pro, `scripts/pbs/`; another scheduler needs its own
-`scripts/<scheduler>/{submit.sh,job.sh}`, about 30 lines each, copied from one of them):
+- GPUs: one node of 4 GPUs with ≥ 90 GB each (e.g. H100 94 GB, H200, GB200), ≥ 768 GB of host RAM and node-local
+  NVMe. Another GPU model: set `NUM_GPUS`, `PRL_GPU_MIN_MIB` and the memory settings in
+  `configs/arms/common_ota_single_node.env`.
+- Apptainer ≥ 1.4 or SingularityCE on the GPU nodes, and outbound internet (sandboxes, model API, Hugging Face).
+- A scheduler: PBS Pro (`scripts/pbs/`), Fujitsu PJM (`scripts/pjm/`), or none (`local`: the job runs on the machine
+  you start it on). Another scheduler needs its own `scripts/<scheduler>/{submit.sh,job.sh}`, about 30 lines each.
+- An E2B-compatible sandbox service (anything the e2b SDK can talk to) and its API key, and a container registry it
+  can pull from.
+- A linux/amd64 machine with Docker (buildx) and sudo to build the task images; it may be the GPU machine.
+- For transforms that ask a model (e.g. signed ATLAS): an OpenAI-compatible Chat Completions endpoint.
 
 | # | Step | Command |
 |---|---|---|
-| 1 | Site profile: scheduler and queue, paths (`PRL_EXT` for data, images, checkpoints and runs; `HF_HOME`; `MILES_IMAGE`), host Python, Apptainer or SingularityCE, the sandbox endpoint (`E2B_API_URL`, `E2B_DOMAIN`), the judge endpoint | copy [`configs/sites/example.env`](../configs/sites/example.env) to `configs/sites/<site>.env` (not tracked by git); select it with `PRL_SITE=<site>` |
-| 2 | Miles container image (17.7 GB; `mksquashfs` needs ~74 GB RAM, so use a large CPU node) | `apptainer pull $PRL_EXT/sif/miles_dev-202610022330.sif docker://radixark/miles:dev-202610022330` |
-| 3 | Patched upstream trees into `build/` (also run by every launch) and the check that `third_party/` is pristine | `bash scripts/setup/apply_patches.sh`; `bash scripts/setup/check_third_party.sh` |
-| 4 | Harbor, the e2b SDK and litellm for the container, and the e2b version the templates were checked with (a node with internet) | `PRL_SITE=<site> bash scripts/setup/install_harbor_deps.sh` |
-| 5 | Tasks (728 train + 70 TB-dev) as Harbor dirs and Miles JSONL, plus the model weights | `scripts/setup/prepare_otagent.sh` (usage in its header) |
-| 6 | Megatron checkpoint of the base model (the training start and the KL reference) | `MODEL=qwen3.5-9B bash scripts/setup/convert_ckpt.sh` on one GPU |
-| 7 | Sandboxes: a task snapshot for training and one for TB-dev (the task directories, with tmux added to their images), an image per task, pushed and registered as a template, the manifest in the snapshot, and the oracle / no-op results | `scripts/tools/make_task_snapshot.py`, then `scripts/tools/prebuild_task_images.py` on the Docker machine; the push, the registration and the checks: [`docs/sandboxes.md`](sandboxes.md) |
-| 8 | Keys: private files (0600), never in the environment or the repo | sandboxes: `E2B_API_KEY_FILE` in the site profile; model API: `PRL_JUDGE_KEY_FILE` in the site profile (`configs/arms/ota_judge.env` lists the judge settings) |
-| 9 | Sandbox checks | `python3 scripts/checks/sandbox_smoke.py` (the sandbox contract), `CHAIN=task_check` (oracle must score 1, no-op 0, on a template manifest) |
-| 10 | Framework smoke: two updates on 8 tasks, then a CPU acceptance that writes the receipt every training job requires. Needed once per framework version, not per transform | see below |
-| 11 | Trainer and failure checks (optional, after a trainer or launcher change): train-only replays of the smoke's batches (resume, data parallelism, longest sample, NaN) and drills (killed save, killed or frozen rank, SIGTERM) | `CHAIN=replay PRL_REPLAY_SOURCE=<smoke RUN_DIR>`, or `CHAIN=smoke_grpo+replay`; verdict in `$PRL_EXT/runs/replay_<job>/replay.json` |
+| 1 | Site profile: scheduler, paths, sandbox endpoint, registry, judge. Keys and passwords only as files (chmod 600) | copy [`configs/sites/example.env`](../configs/sites/example.env) to `configs/sites/<site>.env` (not tracked by git) |
+| 2 | The container image (when missing), Harbor and its dependencies for the container, the tasks (728 training + 70 TB-dev) | `PRL_SITE=<site> CHAIN=prepare bash scripts/submit.sh` |
+| 3 | Sandboxes: an image and a template per task | on the Docker machine: `PRL_SITE=<site> bash scripts/setup/build_sandboxes.sh` ([`docs/sandboxes.md`](sandboxes.md)) |
+| 4 | Train and evaluate | `PRL_SITE=<site> bash scripts/quickstart.sh` (README, Quick start ③) |
 
-The framework smoke for GRPO (PPO: `CHAIN=smoke_ppo ... PRL_RUN_ID=<id>`; the reroll and async smokes:
-`ARM=ota_train_smoke_reroll`, `ARM=ota_train_smoke_async`):
-
-```bash
-PRL_SITE=<site> CHAIN=smoke_grpo TRANSFORM=atlas bash scripts/submit.sh   # ARM defaults to ota_train_smoke_transform
-```
-
-The smoke runs 8 tasks of the training snapshot (`configs/arms/ota_train_smoke.env`); its preflight reuses the
-oracle / no-op result of those 8 on the snapshot's templates (`<snapshot>/contract`; a new snapshot gets one with
-`CHAIN=task_check+smoke_grpo PRL_TEMPLATE_MANIFEST=$S/manifest.json PRL_TASK_ROOT=$S/tasks
-PRL_TASK_PROMPTS=$S/smoke.jsonl PRL_TASK_CHECK_OUTPUT=$S/contract` for `S=$PRL_TRAIN_SNAPSHOT`,
-see `scripts/chain/task_smoke.sh`). The receipt (`acceptance.json`) records the hashes of the framework sources
-(not `transforms/`), the model, the context and the schedule; a training job takes the newest receipt that matches
-(`scripts/checks/find_smoke.py`).
+- Put the repository on the cluster where the compute nodes can write: every job applies `patches/` to `third_party/`
+  into `build/` there (`bash scripts/setup/check_third_party.sh` checks that `third_party/` is byte-identical to upstream).
+- The containers see only `PRL_ROOT`, `PRL_EXT`, `HF_HOME` (writable), `PRL_SCRATCH` and the directories in
+  `PRL_EXTRA_BINDS`: keep every file a job reads, the key files too, under them (e.g. `$PRL_EXT/private/`).
+- SingularityCE instead of Apptainer, or login nodes unlike the compute nodes (another CPU, Python < 3.10): the
+  commented settings of `configs/sites/example.env` (`scripts/compat` on `PATH`, `PRL_SINGULARITY`,
+  `PRL_SANDBOX_UNSQUASH=1`, `PRL_HOST_PYTHON`, `PRL_SUBMIT_FINDS_SMOKE=0`).
+- No scheduler (`PRL_SCHEDULER=local`): a command starts the job in the background on this machine; inside another
+  scheduler's allocation add `FOREGROUND=1`, e.g. `sbatch -N 1 --gpus 4 --wrap "PRL_SITE=<site> FOREGROUND=1 bash scripts/quickstart.sh"`.
+- Step 3 on another machine than the cluster: copy `$PRL_EXT/task_snapshots` to the cluster's `PRL_EXT` afterwards.
+- `PRL_SANDBOX_SMOKE_ONLY=1` builds only the 8 tasks of the framework smoke. The quick start then runs its framework
+  smoke on them (2 plain GRPO updates) and stops before training, which needs every training task's template. To try a
+  transform on these 8 tasks: `PRL_SITE=<site> CHAIN=download+convert+smoke_grpo TRANSFORM=atlas bash scripts/submit.sh`.
+- `PRL_SITE=<site> CHAIN=task_check bash scripts/submit.sh` checks the smoke's 8 sandboxes before any training: the
+  official solution must score 1, a no-op agent 0. The first smoke does this by itself when it was not done.
+- The first run of step 4 also downloads the weights and converts them for Megatron, and runs the framework smoke
+  (2 updates on 8 tasks); later runs of the same code skip these.
+- `DRY_RUN=1` prints the scheduler command and submits nothing; `ELAPSE=hh:mm:ss` sets a job's time limit. Job logs are
+  in `$PRL_EXT/logs/`; each run's `train.log` (in `$PRL_EXT/runs/<run>/`) has a line per update, `step N: {'train/loss': ...}`.

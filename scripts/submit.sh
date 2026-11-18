@@ -1,6 +1,6 @@
 #!/bin/bash
 # Submit a chain job (scripts/lib/chain.sh) on the cluster PRL_SITE names: its profile configs/sites/<site>.env
-# (start from configs/sites/example.env) says which scheduler it has (PRL_SCHEDULER: pjm or pbs), and that
+# (start from configs/sites/example.env) says which scheduler it has (PRL_SCHEDULER: pjm, pbs or local: this machine, scripts/local), and that
 # scheduler's wrapper scripts/<scheduler>/submit.sh submits the job. From the repo root on a login node:
 #   PRL_SITE=<site> CHAIN=train_eval ARM=ota_train_transform TRANSFORM=atlas PRL_RUN_ID=my_atlas bash scripts/submit.sh
 #   PRL_SITE=<site> CHAIN=smoke_grpo TRANSFORM=atlas bash scripts/submit.sh          # the framework smoke
@@ -13,5 +13,5 @@ cd "$(dirname "$0")/.."
 [ -f "configs/sites/$PRL_SITE.env" ] || { echo "no configs/sites/$PRL_SITE.env" >&2; exit 1; }
 scheduler=$(export PRL_ROOT=$PWD; set -a; source "configs/sites/$PRL_SITE.env"; echo "${PRL_SCHEDULER:-}")
 [ -f "scripts/${scheduler:-none}/submit.sh" ] || {
-  echo "configs/sites/$PRL_SITE.env: PRL_SCHEDULER=${scheduler:-(unset)}; supported: pjm, pbs" >&2; exit 1; }
+  echo "configs/sites/$PRL_SITE.env: PRL_SCHEDULER=${scheduler:-(unset)}; supported: pjm, pbs, local" >&2; exit 1; }
 exec bash "scripts/$scheduler/submit.sh" "$@"
