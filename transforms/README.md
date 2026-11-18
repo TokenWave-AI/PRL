@@ -83,7 +83,9 @@ the policy generates from this step on and the tests grade it. All branches run 
 k = await ask(prompt, check=fn)     # prompt is a string or a list of messages
 ```
 
-- Uses the run's judge model (`PRL_JUDGE_*`, e.g. `configs/arms/ota_judge.env`).
+- Uses the run's judge model (`PRL_JUDGE_*`, set in the site profile; all settings: `configs/arms/ota_judge.env`).
+  A teacher besides the judge: the same variables with another prefix (e.g. `PRL_TEACHER_*`), and
+  `ask(..., prefix="PRL_TEACHER_")`.
 - `check(answer)` returns the value to use; if it raises, the answer is rejected, and the framework tells the model
   why and asks again. If no answer passes, `ask` raises `Unanswered` and the trajectory trains as it was.
 - Retries, waiting out 429s, concurrency, and switching in turn to the models of `PRL_JUDGE_FALLBACK_MODELS` when a

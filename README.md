@@ -62,7 +62,14 @@ async def atlas(traj: Trajectory, other_weight: float = 0.0) -> Trajectory:
 ```
 
 It uses only Reweight. Given the returned `traj`, the framework removes the masked steps' tokens from the loss and trains the rest as usual.
-To try it and train it: ② and ③ of the [Quick start](#quick-start).
+
+**Run it, one command**: train Qwen3.5-9B with ATLAS on OpenThoughts-Agent-v1-RL, then evaluate it on TB-dev (one job on 4 GPUs, about 15 h):
+
+```bash
+PRL_SITE=<site> TRANSFORM=atlas bash scripts/quickstart.sh
+```
+
+`<site>` is your cluster, set up once in [two steps](#quick-start); to try the function without a GPU first, on 8 recorded trajectories: [Quick start ②](#quick-start).
 
 ## What your function can change
 
@@ -146,29 +153,31 @@ Reweight, Rewrite and Reroll all train end to end in a full run; how best to use
 
 ## Quick start
 
-**⓪ Set up.**
-
-| Task | Requirements |
-|---|---|
-| write a function and try it on recorded trajectories (① ②) | Python ≥ 3.10; if your function asks a model, a judge (below) |
-| train and evaluate (③) | one node of 4 GPUs with ≥ 90 GB each and ≥ 768 GB of RAM, on a cluster or a single machine; an E2B-compatible sandbox service; set up once in 4 steps: [`docs/setup.md`](docs/setup.md) |
-
-**Judge / teacher** (the model `ask` calls): any OpenAI-compatible Chat Completions endpoint, set in the site profile (`configs/sites/<site>.env`, copied from `configs/sites/example.env`;
-all judge settings: `configs/arms/ota_judge.env`):
+**Run: one command.** From the repository root, on a site set up once (below):
 
 ```bash
-PRL_JUDGE_API_BASE=https://<endpoint>/v1
-PRL_JUDGE_MODEL=<model>
-PRL_JUDGE_KEY_FILE=<key file>                           # chmod 600; the key is read from the file only, never logged
-PRL_JUDGE_EXTRA_BODY='{"reasoning_effort": "medium"}'   # optional: parameters sent with every request
-PRL_JUDGE_FALLBACK_MODELS=<model,...>                   # optional: the models to try in turn after a refusal
+PRL_SITE=<site> bash scripts/quickstart.sh                          # signed ATLAS (58.09% in the results)
+PRL_SITE=<site> TRANSFORM=atlas bash scripts/quickstart.sh          # any transform of transforms/, yours too
 ```
 
-For the teacher, set a group of variables with another prefix (e.g. `PRL_TEACHER_*`) and call `ask(..., prefix="PRL_TEACHER_")`.
+One job on one node of 4 GPUs (≥ 90 GB each, ≥ 768 GB of RAM) trains Qwen3.5-9B on OpenThoughts-Agent-v1-RL (68 updates) and evaluates it on TB-dev: about 15 h. The first job also pulls the container image, downloads the tasks and the weights, and runs a short framework smoke.
 
-**① Write a function.**
+- Parameters: `PRL_TRANSFORM_ARGS='{"other_weight": 0.3}'`; algorithm: `ALGO=reinforce_plus_plus` (`ALGO=ppo` after its own smoke, [`CONTRIBUTING.md`](CONTRIBUTING.md)); chains: `TRANSFORM=rewrite+atlas` (run in order; `+`, not a comma, because the submit commands split variables on commas).
+- The judge is the one of your site profile; the 58.09% run used gpt-6.1-sol, at the reasoning effort low that the signed ATLAS arm sets (`PRL_JUDGE_EXTRA_BODY`).
+- Each update logs a line `step N: {'train/loss': ...}` in the run's `train.log` (`$PRL_EXT/runs/<run>/`); the TB-dev score is `eval/heldout` in the evaluation's. A job stopped by its time limit goes on when the same command is run again.
 
-In `transforms/my_transform.py`, write a function of the same name (file name, function name and run-time name agree):
+**Set up once: two steps** (details: [`docs/setup.md`](docs/setup.md)).
+
+| # | Step | Command |
+|---|---|---|
+| 1 | Site profile: the scheduler (PBS, PJM or none), a work directory, an E2B-compatible sandbox service and the registry it pulls from, the judge (any OpenAI-compatible endpoint) | `cp configs/sites/example.env configs/sites/<site>.env`, then fill in its first block |
+| 2 | Sandboxes: an image and a template per task, on a machine with Docker | `PRL_SITE=<site> bash scripts/setup/build_sandboxes.sh` |
+
+A quicker first try: with `PRL_SANDBOX_SMOKE_ONLY=1`, step 2 builds only 8 tasks, and the same command then tries the transform on them (2 updates, about 30 min) instead of training.
+
+**Your own transform: write, try, train.**
+
+**① Write a function.** In `transforms/my_transform.py`, write a function of the same name (file name, function name and run-time name agree):
 
 ```python
 def my_transform(traj, **params):
@@ -183,9 +192,7 @@ def my_transform(traj, **params):
 - **Parameters**: the function's keyword arguments are its run-time settings (`PRL_TRANSFORM_ARGS='{"other_weight": 0.3}'`).
 - To ask a model, write `async def` and `await ask(...)`; otherwise a plain function. It is called once per trajectory.
 
-**② Try it on recorded trajectories, no GPU.**
-
-The repo ships 8 real training trajectories; your function runs on them (model calls included) and each decision is written to the output directory. From the repository root:
+**② Try it on recorded trajectories, no GPU.** The repo ships 8 real training trajectories; your function runs on them (model calls included) and each decision is written to the output directory. With Python ≥ 3.10, from the repository root:
 
 ```bash
 python3 -m venv .venv && . .venv/bin/activate && pip install -e '.[check]'
@@ -194,30 +201,14 @@ PRL_TRANSFORM=my_transform MODEL_HF_DIR=tokenizer \
 PRL_TRANSFORM_CHECK_OUT=/tmp/check python -m prl.transforms.check
 ```
 
-A function that asks a model reads the judge settings from the environment here: `set -a; source configs/sites/<site>.env; set +a` first.
-
-Reading the result:
+A function that asks a model uses the judge of the site profile: `set -a; source configs/sites/<site>.env; set +a` first.
 
 - The terminal shows one line per trajectory: `[transform check] <trajectory>: reward <reward>, <steps> steps, <status>, steps changed: <e.g. 5 weighted, 2 masked>, trained tokens <before> -> <after>, <seconds> s`,
   where the status is `ok` or `skipped`. A last line `passed` means it passed; otherwise it prints `FAILED`, the trajectory and the reason.
 - The output directory has one subdirectory per trajectory: `transform.json` is the framework's record (each function's status and time, what you wrote into `traj.record`,
   the steps it changed, e.g. `weighted_steps` {step: new weight}, the trainable tokens before / after) and `transform_calls.json` every `ask` request and answer (the ATLAS judge's: `atlas_labels.json`); `summary.json` sums up all 8.
 
-**③ Train and evaluate: one command.**
-
-On a set-up site, from the repository root:
-
-```bash
-PRL_SITE=<site> bash scripts/quickstart.sh                          # signed ATLAS
-PRL_SITE=<site> TRANSFORM=my_transform bash scripts/quickstart.sh   # your function
-```
-
-- One job trains Qwen3.5-9B on OpenThoughts-Agent-v1-RL (68 updates) and evaluates it on TB-dev, about 15 h; the first run also prepares the model and runs a short framework smoke.
-- The default is signed ATLAS of the results (58.09%), with the judge gpt-6.1-sol at reasoning effort low (`PRL_JUDGE_EXTRA_BODY='{"reasoning_effort": "low"}'`).
-- Parameters: `PRL_TRANSFORM_ARGS='{"other_weight": 0.3}'`; algorithm: `ALGO=reinforce_plus_plus` (`ALGO=ppo` after its own smoke, [`CONTRIBUTING.md`](CONTRIBUTING.md)); chains: `TRANSFORM=rewrite+atlas` (run in order; `+`, not a comma, because the submit commands split variables on commas).
-- The job first runs your function on the recorded trajectories and does not start training if it raises, times out or skips them all.
-- Each update logs a line `step N: {'train/loss': ...}` in the run's `train.log` (`$PRL_EXT/runs/<run>/`); the TB-dev score is `eval/heldout` in the evaluation's. A job stopped by its time limit goes on when the same command is run again.
-- With only the smoke's 8 sandboxes built (docs/setup.md), try a transform on them: `PRL_SITE=<site> CHAIN=download+convert+smoke_grpo TRANSFORM=atlas bash scripts/submit.sh` (2 updates).
+**③ Train and evaluate it**: `PRL_SITE=<site> TRANSFORM=my_transform bash scripts/quickstart.sh`. The job first runs your function on the recorded trajectories and does not start training if it raises, times out or skips them all.
 
 ## Going further
 

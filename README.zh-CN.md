@@ -62,7 +62,14 @@ async def atlas(traj: Trajectory, other_weight: float = 0.0) -> Trajectory:
 ```
 
 它只用了 Reweight。框架拿到返回的 `traj` 后，把被 mask 的步对应的 token 从 loss 里去掉，其余照常。
-试跑和训练见[快速开始](#快速开始)的 ② ③。
+
+**一条命令跑起来**：用 ATLAS 在 OpenThoughts-Agent-v1-RL 上训练 Qwen3.5-9B，再在 TB-dev 上评测（一个作业，4 张卡，约 15 小时）：
+
+```bash
+PRL_SITE=<site> TRANSFORM=atlas bash scripts/quickstart.sh
+```
+
+`<site>` 是你的集群，一次性配置[两步](#快速开始)；想先不用 GPU、在 8 条录好的轨迹上试这个函数：[快速开始 ②](#快速开始)。
 
 ## 函数里能动什么
 
@@ -146,29 +153,31 @@ Reweight、Rewrite、Reroll 三层都能在完整训练里跑通；教师的改�
 
 ## 快速开始
 
-**⓪ 准备环境。** 
-
-| 待办 | 要求 |
-|---|---|
-| 写函数，在录好的轨迹上试跑（①②） | Python ≥ 3.10；函数里要问模型的话，再配一个判官（见下） |
-| 训练、评测（③） | 一个节点 4 张 ≥ 90 GB 的卡、≥ 768 GB 内存，集群或单机都行；一个兼容 E2B 的沙盒服务；一次性配置 4 步：[`docs/setup.md`](docs/setup.md) |
-
-**判官 / 教师**（`ask` 调用的模型）任何 OpenAI 兼容的 Chat Completions 接口，请确认（`configs/sites/<site>.env`，从 `configs/sites/example.env` 复制；
-全部判官设置见 `configs/arms/ota_judge.env`）：
+**运行：一条命令。** 在配好的站点上（配置见下），于仓库根目录运行：
 
 ```bash
-PRL_JUDGE_API_BASE=https://<服务地址>/v1
-PRL_JUDGE_MODEL=<模型名>
-PRL_JUDGE_KEY_FILE=<key 文件>                           # chmod 600；key 只从文件读，不进日志
-PRL_JUDGE_EXTRA_BODY='{"reasoning_effort": "medium"}'   # 可选：随每个请求发送的参数
-PRL_JUDGE_FALLBACK_MODELS=<备选模型,...>                # 可选：被拒答时依次换的模型
+PRL_SITE=<site> bash scripts/quickstart.sh                          # signed ATLAS（结果表里的 58.09%）
+PRL_SITE=<site> TRANSFORM=atlas bash scripts/quickstart.sh          # transforms/ 里的任意 transform，包括你自己写的
 ```
 
-教师和判官配一组前缀不同的变量（例如 `PRL_TEACHER_*`），调用时写 `ask(..., prefix="PRL_TEACHER_")`。
+一个作业，一个节点 4 张卡（每张 ≥ 90 GB，内存 ≥ 768 GB）：在 OpenThoughts-Agent-v1-RL 上训练 Qwen3.5-9B（68 次更新），再在 TB-dev 上评测，约 15 小时。第一次运行还会拉容器镜像、下载任务和权重、跑一次简短的框架烟测。
 
-**① 写一个函数。** 
+- 改参数：`PRL_TRANSFORM_ARGS='{"other_weight": 0.3}'`；换算法：`ALGO=reinforce_plus_plus`（`ALGO=ppo` 要先跑它自己的烟测，见 [`CONTRIBUTING.md`](CONTRIBUTING.md)）；串联：`TRANSFORM=rewrite+atlas`（按顺序执行；用 `+` 不用逗号，因为提交命令按逗号切分变量）。
+- 判官用站点配置里的；58.09% 那次用的是 gpt-6.1-sol，reasoning effort 是 signed ATLAS 的 arm 默认的 low（`PRL_JUDGE_EXTRA_BODY`）。
+- 每次更新在这次运行的 `train.log`（`$PRL_EXT/runs/<run>/`）里记一行 `step N: {'train/loss': ...}`；TB-dev 分数是评测那份 `train.log` 里的 `eval/heldout`。作业到时限被停掉的话，再运行同一条命令会接着跑。
 
-在 `transforms/my_transform.py` 里写一个同名函数（文件名、函数名、运行时的名字三处一致）：
+**一次性配置：两步**（细节见 [`docs/setup.md`](docs/setup.md)）。
+
+| # | 步骤 | 命令 |
+|---|---|---|
+| 1 | 站点配置：调度器（PBS、PJM 或不用调度器）、一个工作目录、一个兼容 E2B 的沙盒服务和它拉镜像的 registry、判官（任何 OpenAI 兼容接口） | `cp configs/sites/example.env configs/sites/<site>.env`，填好最上面一段 |
+| 2 | 沙盒：每个任务一个镜像和一个 template，在一台有 Docker 的机器上 | `PRL_SITE=<site> bash scripts/setup/build_sandboxes.sh` |
+
+想先快速试一下：第 2 步加 `PRL_SANDBOX_SMOKE_ONLY=1` 只建 8 个任务，同一条命令就改成在这 8 个任务上试 transform（2 次更新，约 30 分钟），不做完整训练。
+
+**写自己的 transform：写、试、训。**
+
+**① 写一个函数。** 在 `transforms/my_transform.py` 里写一个同名函数（文件名、函数名、运行时的名字三处一致）：
 
 ```python
 def my_transform(traj, **params):
@@ -183,9 +192,7 @@ def my_transform(traj, **params):
 - **参数**：函数的关键字参数就是运行时配置（`PRL_TRANSFORM_ARGS='{"other_weight": 0.3}'`）。
 - 要问模型时写成 `async def`，用 `await ask(...)`；不问模型就写普通函数。一条轨迹调用一次。
 
-**② 不用 GPU，先在录好的轨迹上试。** 
-
-仓库带了 8 条真实训练轨迹，你的函数会在上面跑一遍（包括问模型），每条的决定写到输出目录。在仓库根目录运行：
+**② 不用 GPU，先在录好的轨迹上试。** 仓库带了 8 条真实训练轨迹，你的函数会在上面跑一遍（包括问模型），每条的决定写到输出目录。需要 Python ≥ 3.10，在仓库根目录运行：
 
 ```bash
 python3 -m venv .venv && . .venv/bin/activate && pip install -e '.[check]'
@@ -194,30 +201,14 @@ PRL_TRANSFORM=my_transform MODEL_HF_DIR=tokenizer \
 PRL_TRANSFORM_CHECK_OUT=/tmp/check python -m prl.transforms.check
 ```
 
-函数要问模型的话，这里的判官设置从环境变量读：先运行 `set -a; source configs/sites/<site>.env; set +a`。
-
-怎么看结果：
+函数要问模型的话，用站点配置里的判官：先运行 `set -a; source configs/sites/<site>.env; set +a`。
 
 - 终端里每条轨迹一行：`[transform check] <轨迹>: reward <分数>, <步数> steps, <状态>, steps changed: <如 5 weighted, 2 masked>, trained tokens <改前> -> <改后>, <秒数> s`，
   状态是 `ok` 或 `skipped`。最后一行是 `passed` 为通过；出错时打印 `FAILED`、出错的轨迹和原因。
 - 输出目录里每条轨迹一个子目录：`transform.json` 是框架的记录（每个函数的状态和用时、你写进 `traj.record` 的内容、
   改了哪些步骤，如 `weighted_steps` {步骤: 新权重}、可训练 token 改前 / 改后的数量），`transform_calls.json` 是每次 `ask` 的请求和回答（ATLAS 判官的在 `atlas_labels.json`）；`summary.json` 汇总全部 8 条。
 
-**③ 训练 + 评测：一条命令。** 
-
-在配好的站点上，于仓库根目录运行：
-
-```bash
-PRL_SITE=<site> bash scripts/quickstart.sh                          # signed ATLAS
-PRL_SITE=<site> TRANSFORM=my_transform bash scripts/quickstart.sh   # 你的函数
-```
-
-- 一个作业在 OpenThoughts-Agent-v1-RL 上训练 Qwen3.5-9B（68 次更新），再在 TB-dev 上评测，约 15 小时；第一次运行还会准备模型、跑一次简短的框架烟测。
-- 默认跑结果表里的 signed ATLAS（58.09%），判官用 gpt-6.1-sol，reasoning effort 设为 low（`PRL_JUDGE_EXTRA_BODY='{"reasoning_effort": "low"}'`）。
-- 改参数：`PRL_TRANSFORM_ARGS='{"other_weight": 0.3}'`；换算法：`ALGO=reinforce_plus_plus`（`ALGO=ppo` 要先跑它自己的烟测，见 [`CONTRIBUTING.md`](CONTRIBUTING.md)）；串联：`TRANSFORM=rewrite+atlas`（按顺序执行；用 `+` 不用逗号，因为提交命令按逗号切分变量）。
-- 作业开头会先在录好的轨迹上试跑你的函数，函数报错、超时或全部跳过就不开训。
-- 每次更新在这次运行的 `train.log`（`$PRL_EXT/runs/<run>/`）里记一行 `step N: {'train/loss': ...}`；TB-dev 分数是评测那份 `train.log` 里的 `eval/heldout`。作业到时限被停掉的话，再运行同一条命令会接着跑。
-- 只建了烟测的 8 个沙盒时（见 docs/setup.md），可以在这 8 个任务上试 transform：`PRL_SITE=<site> CHAIN=download+convert+smoke_grpo TRANSFORM=atlas bash scripts/submit.sh`（2 次更新）。
+**③ 训练 + 评测**：`PRL_SITE=<site> TRANSFORM=my_transform bash scripts/quickstart.sh`。作业开头会先在录好的轨迹上试跑你的函数，函数报错、超时或全部跳过就不开训。
 
 ## 进阶用法
 

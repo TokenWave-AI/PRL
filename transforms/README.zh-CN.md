@@ -73,7 +73,8 @@
 k = await ask(prompt, check=fn)     # prompt 是字符串或 messages 列表
 ```
 
-- 用运行配置的判官模型（`PRL_JUDGE_*`，例如 `configs/arms/ota_judge.env`）。
+- 用运行配置的判官模型（`PRL_JUDGE_*`，写在站点配置里；全部设置见 `configs/arms/ota_judge.env`）。
+  判官之外再要一个教师：配一组前缀不同的同名变量（例如 `PRL_TEACHER_*`），调用时写 `ask(..., prefix="PRL_TEACHER_")`。
 - `check(answer)` 返回要用的值；抛错表示不合格，框架会把原因告诉模型再问一次。问不出来就抛 `Unanswered`，这条轨迹照原样训练。
 - 重试、429 等待、并发、被内容过滤拒绝时依次换 `PRL_JUDGE_FALLBACK_MODELS` 里的模型，都由框架处理。
 - 每次调用（请求、回答、用时、token 数、实际作答的模型）存到 `<trial_dir>/transform_calls.json`。

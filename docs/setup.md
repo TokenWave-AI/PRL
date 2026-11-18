@@ -1,45 +1,56 @@
 # Setting up a site
 
-A site is a cluster, or a single machine, that runs PRL. Set it up once; then `bash scripts/quickstart.sh` trains and
-evaluates (README, Quick start ③).
-
-What a site needs:
-
-- GPUs: one node of 4 GPUs with ≥ 90 GB each (e.g. H100 94 GB, H200, GB200), ≥ 768 GB of host RAM and node-local
-  NVMe. Another GPU model: set `NUM_GPUS`, `PRL_GPU_MIN_MIB` and the memory settings in
-  `configs/arms/common_ota_single_node.env`.
-- Apptainer ≥ 1.4 or SingularityCE on the GPU nodes, and outbound internet (sandboxes, model API, Hugging Face).
-- A scheduler: PBS Pro (`scripts/pbs/`), Fujitsu PJM (`scripts/pjm/`), or none (`local`: the job runs on the machine
-  you start it on). Another scheduler needs its own `scripts/<scheduler>/{submit.sh,job.sh}`, about 30 lines each.
-- An E2B-compatible sandbox service (anything the e2b SDK can talk to) and its API key, and a container registry it
-  can pull from.
-- A linux/amd64 machine with Docker (buildx) and sudo to build the task images; it may be the GPU machine.
-- For transforms that ask a model (e.g. signed ATLAS): an OpenAI-compatible Chat Completions endpoint.
+A site is a cluster, or a single machine, that runs PRL. Set it up once, in two steps:
 
 | # | Step | Command |
 |---|---|---|
-| 1 | Site profile: scheduler, paths, sandbox endpoint, registry, judge. Keys and passwords only as files (chmod 600) | copy [`configs/sites/example.env`](../configs/sites/example.env) to `configs/sites/<site>.env` (not tracked by git) |
-| 2 | The container image (when missing), Harbor and its dependencies for the container, the tasks (728 training + 70 TB-dev) | `PRL_SITE=<site> CHAIN=prepare bash scripts/submit.sh` |
-| 3 | Sandboxes: an image and a template per task | on the Docker machine: `PRL_SITE=<site> bash scripts/setup/build_sandboxes.sh` ([`docs/sandboxes.md`](sandboxes.md)) |
-| 4 | Train and evaluate | `PRL_SITE=<site> bash scripts/quickstart.sh` (README, Quick start ③) |
+| 1 | **Site profile**: fill in its first block (scheduler, a work directory, the sandbox service, the registry, the judge) and put the key files where it names them (chmod 600) | `cp configs/sites/example.env configs/sites/<site>.env` |
+| 2 | **Sandboxes**: an image and a template per task, on a machine with Docker | `PRL_SITE=<site> bash scripts/setup/build_sandboxes.sh` ([`sandboxes.md`](sandboxes.md)) |
 
-- Put the repository on the cluster where the compute nodes can write: every job applies `patches/` to `third_party/`
-  into `build/` there (`bash scripts/setup/check_third_party.sh` checks that `third_party/` is byte-identical to upstream).
-- The containers see only `PRL_ROOT`, `PRL_EXT`, `HF_HOME` (writable), `PRL_SCRATCH` and the directories in
-  `PRL_EXTRA_BINDS`: keep every file a job reads, the key files too, under them (e.g. `$PRL_EXT/private/`).
-- SingularityCE instead of Apptainer, or login nodes unlike the compute nodes (another CPU, Python < 3.10): the
-  commented settings of `configs/sites/example.env` (`scripts/compat` on `PATH`, `PRL_SINGULARITY`,
-  `PRL_SANDBOX_UNSQUASH=1`, `PRL_HOST_PYTHON`, `PRL_SUBMIT_FINDS_SMOKE=0`).
-- No scheduler (`PRL_SCHEDULER=local`): a command starts the job in the background on this machine; inside another
-  scheduler's allocation add `FOREGROUND=1`, e.g. `sbatch -N 1 --gpus 4 --wrap "PRL_SITE=<site> FOREGROUND=1 bash scripts/quickstart.sh"`.
-- Step 3 on another machine than the cluster: copy `$PRL_EXT/task_snapshots` to the cluster's `PRL_EXT` afterwards.
-- `PRL_SANDBOX_SMOKE_ONLY=1` builds only the 8 tasks of the framework smoke. The quick start then runs its framework
-  smoke on them (2 plain GRPO updates) and stops before training, which needs every training task's template. To try a
-  transform on these 8 tasks: `PRL_SITE=<site> CHAIN=download+convert+smoke_grpo TRANSFORM=atlas bash scripts/submit.sh`.
-- `PRL_SITE=<site> CHAIN=task_check bash scripts/submit.sh` checks the smoke's 8 sandboxes before any training: the
-  official solution must score 1, a no-op agent 0. The first smoke does this by itself when it was not done.
-- The first run of step 4 also downloads the weights and converts them for Megatron, and runs the framework smoke
-  (2 updates on 8 tasks); later runs of the same code skip these.
-- `DRY_RUN=1` prints the scheduler command and submits nothing; `ELAPSE=hh:mm:ss` sets a job's time limit. Job logs are
-  in `$PRL_EXT/logs/`; each run's `train.log` (in `$PRL_EXT/runs/<run>/`) has a line per update, `step N: {'train/loss': ...}`.
-  SGLang's `post-warmup freeze_gc failed` with a `Connection refused` traceback at the start is harmless.
+Then, from the repository root on the cluster:
+
+```bash
+PRL_SITE=<site> bash scripts/quickstart.sh
+```
+
+Its first job also does the rest, each part once: the container image (`radixark/miles:v0.1.2`), Harbor and its
+dependencies, the tasks (728 training + 70 TB-dev), the weights and their Megatron checkpoint, and a framework smoke
+(2 updates on 8 tasks). Later runs skip them.
+
+## What a site needs
+
+- One node of 4 GPUs with ≥ 90 GB each (e.g. H100 94 GB, H200, GB200), ≥ 768 GB of host RAM and node-local NVMe.
+  Another GPU model: set `NUM_GPUS`, `PRL_GPU_MIN_MIB` and the memory settings in `configs/arms/common_ota_single_node.env`.
+- Apptainer ≥ 1.4 or SingularityCE on the GPU nodes, and outbound internet (sandboxes, model API, Hugging Face).
+- PBS Pro, Fujitsu PJM, or no scheduler (`PRL_SCHEDULER=local`: the job runs on the machine you start it on).
+- An E2B-compatible sandbox service (anything the e2b SDK can talk to) and a container registry it can pull from.
+- For step 2, a linux/amd64 machine with Docker (buildx) and sudo; it may be the GPU machine.
+- For transforms that ask a model (e.g. signed ATLAS, the default): an OpenAI-compatible Chat Completions endpoint.
+
+## Good to know
+
+- **A quicker first try**: `PRL_SANDBOX_SMOKE_ONLY=1` in step 2 builds only the smoke's 8 tasks; the same quick
+  start command then tries the transform on them (2 updates, about 30 min) instead of training. Step 2 run again
+  without it builds the rest.
+- **Logs**: in `$PRL_EXT/logs/`; each run's `train.log` (`$PRL_EXT/runs/<run>/`) has a line per update,
+  `step N: {'train/loss': ...}`. SGLang's `post-warmup freeze_gc failed` with a `Connection refused` traceback at the
+  start is harmless.
+- `DRY_RUN=1` prints the scheduler command and submits nothing; `ELAPSE=hh:mm:ss` sets a job's time limit. A job
+  stopped by its time limit goes on when the same command is run again.
+- `PRL_SITE=<site> CHAIN=task_check bash scripts/submit.sh` checks the smoke's 8 sandboxes alone (the official
+  solution must score 1, a no-op agent 0); the first smoke does it by itself. `CHAIN=prepare` alone does the first
+  job's preparation only (e.g. the image ahead of time).
+
+## Site specifics
+
+- Put the repository where the compute nodes can write: every job applies `patches/` to `third_party/` into `build/`
+  there (`bash scripts/setup/check_third_party.sh` checks that `third_party/` is byte-identical to upstream).
+- The containers see only `PRL_ROOT`, `PRL_EXT`, `HF_HOME`, `PRL_SCRATCH` and `PRL_EXTRA_BINDS`: keep every file a job
+  reads, the key files too, under them (e.g. `$PRL_EXT/private/`).
+- Step 2 on another machine than the cluster: set `PRL_EXT` to a directory there, then copy its `task_snapshots/` to
+  the cluster's `PRL_EXT` ([`sandboxes.md`](sandboxes.md)).
+- SingularityCE, or login nodes unlike the compute nodes (another CPU, Python < 3.10): the commented settings under
+  "Only for some sites" in `configs/sites/example.env`.
+- No scheduler inside another scheduler's allocation: add `FOREGROUND=1`, e.g.
+  `sbatch -N 1 --gpus 4 --wrap "PRL_SITE=<site> FOREGROUND=1 bash scripts/quickstart.sh"`.
+- Another scheduler: its own `scripts/<scheduler>/{submit.sh,job.sh}`, about 30 lines each (copy `scripts/pbs/`).

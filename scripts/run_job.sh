@@ -26,7 +26,7 @@ echo "[run_job] job ${JOB_ID:-?} on $(hostname) | DATASET=$DATASET MODE=${MODE:-
 echo "[run_job] PRL_EXT=$PRL_EXT PRL_SCRATCH=$PRL_SCRATCH MILES_IMAGE=$MILES_IMAGE"
 nvidia-smi -L
 # A SIF, or the image unpacked to a directory (the chain step sandbox, scripts/lib/chain.sh)
-[ -e "$MILES_IMAGE" ] || { echo "Miles image missing: $MILES_IMAGE (pull it once per site: docs/setup.md, step 2)" >&2; exit 1; }
+[ -e "$MILES_IMAGE" ] || { echo "Miles image missing: $MILES_IMAGE (the quick start's first job pulls it: CHAIN=prepare, docs/setup.md)" >&2; exit 1; }
 mkdir -p "$PRL_SCRATCH" "$PRL_EXT/logs"
 # Snapshot the launcher scripts: bash reads scripts lazily, so editing them mid-run breaks the job.
 SNAP=$PRL_SCRATCH/launcher_${JOB_ID:-$$}; mkdir -p "$SNAP/lib" && cp scripts/run.sh "$SNAP/" && cp scripts/lib/*.sh "$SNAP/lib/"

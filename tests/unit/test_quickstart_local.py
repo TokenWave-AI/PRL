@@ -17,7 +17,9 @@ import pytest
 ROOT = Path(__file__).resolve().parents[2]
 COMMON = ("PRL_EXT=${PRL_EXT:-/nonexistent/ext}\nPRL_SCRATCH=${PRL_SCRATCH:-/tmp/scratch_test}\nHF_HOME=/nonexistent/hf\n"
           "MILES_IMAGE=/nonexistent/miles.sif\nE2B_API_URL=https://e2b.example\nE2B_DOMAIN=e2b.example\n"
-          "E2B_API_KEY_FILE=$PRL_EXT/private/e2b_api_key\nPRL_HOST_PYTHON=python3\n")
+          "E2B_API_KEY_FILE=$PRL_EXT/private/e2b_api_key\nPRL_HOST_PYTHON=python3\n"
+          "PRL_JUDGE_API_BASE=${PRL_JUDGE_API_BASE:-https://judge.example/v1}\nPRL_JUDGE_MODEL=judge\n"
+          "PRL_JUDGE_KEY_FILE=$PRL_EXT/private/judge_api_key\n")
 SITES = {"_test_qs_pbs": "PRL_SCHEDULER=pbs\nPRL_PBS_QUEUE=gpu\n", "_test_qs_local": "PRL_SCHEDULER=local\n"}
 
 
@@ -29,6 +31,23 @@ def _sites():
     yield
     for path in paths:
         path.unlink(missing_ok=True)
+
+
+def _sandboxes(tmp_path: Path, ready: int, tasks: int = 12) -> None:
+    """The training snapshot build_sandboxes.sh leaves: its tasks, and templates for the first `ready` of them."""
+    snapshot = tmp_path / "ext" / "task_snapshots" / "otagent728"
+    (tmp_path / "ext" / "private").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "ext" / "private" / "judge_api_key").write_text("k\n")
+    for i in range(tasks):
+        (snapshot / "tasks" / f"t{i}").mkdir(parents=True, exist_ok=True)
+    rows = {f"t{i}": {"status": "ready" if i < ready else "failed"} for i in range(tasks)}
+    (snapshot / "manifest.json").write_text(json.dumps({"tasks": rows}, indent=2))
+
+
+@pytest.fixture
+def built(tmp_path: Path) -> Path:
+    _sandboxes(tmp_path, ready=12)
+    return tmp_path
 
 
 def _run(command: list[str], tmp_path: Path, **env: str) -> subprocess.CompletedProcess:
@@ -43,17 +62,53 @@ def _run(command: list[str], tmp_path: Path, **env: str) -> subprocess.Completed
     return out
 
 
-def test_quickstart_submits_signed_atlas_in_one_job(tmp_path: Path) -> None:
+def test_quickstart_submits_signed_atlas_in_one_job(built: Path) -> None:
+    tmp_path = built
     out = _run(["bash", "scripts/quickstart.sh"], tmp_path, PRL_SITE="_test_qs_pbs", DRY_RUN="1")
     assert out.returncode == 0, out.stderr
     assert out.stdout.startswith("qsub ")
-    for part in ("PRL_CHAIN=download+convert+smoke+train_eval", "SMOKE_ARM=ota_train_smoke_noturncap",
+    for part in ("PRL_CHAIN=prepare+download+convert+smoke+train_eval", "SMOKE_ARM=ota_train_smoke_noturncap",
                  "ARM=ota_train_atlas_signed", "ALGO=grpo", "PRL_RUN_ID=quickstart", "TRANSFORM=atlas_signed",
                  "PRL_TRANSFORM_ARGS_FILE=", "walltime=168:00:00"):
         assert part in out.stdout, part
 
 
-def test_quickstart_runs_your_transform_on_the_transform_arm(tmp_path: Path) -> None:
+def test_quickstart_follows_the_sandboxes_built(tmp_path: Path) -> None:
+    (tmp_path / "ext" / "private").mkdir(parents=True)
+    (tmp_path / "ext" / "private" / "judge_api_key").write_text("k\n")
+    none = _run(["bash", "scripts/quickstart.sh"], tmp_path, PRL_SITE="_test_qs_pbs", DRY_RUN="1")
+    assert none.returncode != 0 and "no sandboxes yet" in none.stderr and "build_sandboxes.sh" in none.stderr
+    _sandboxes(tmp_path, ready=8)  # PRL_SANDBOX_SMOKE_ONLY=1: the smoke's 8 only, so the transform's smoke on them
+    tried = _run(["bash", "scripts/quickstart.sh"], tmp_path, PRL_SITE="_test_qs_pbs", DRY_RUN="1")
+    assert tried.returncode == 0, tried.stderr
+    assert "trying atlas_signed on the smoke's 8" in tried.stderr
+    for part in ("PRL_CHAIN=prepare+download+convert+smoke_grpo,", "ARM=ota_train_smoke_transform",
+                 "TRANSFORM=atlas_signed", "PRL_TRANSFORM_ARGS_FILE=", "walltime=08:00:00"):
+        assert part in tried.stdout, part
+    assert "train_eval" not in tried.stdout
+    rpp = _run(["bash", "scripts/quickstart.sh"], tmp_path, PRL_SITE="_test_qs_pbs", DRY_RUN="1",
+               ALGO="reinforce_plus_plus")
+    assert rpp.returncode != 0 and "8 have a template" in rpp.stderr
+    _sandboxes(tmp_path, ready=3)
+    few = _run(["bash", "scripts/quickstart.sh"], tmp_path, PRL_SITE="_test_qs_pbs", DRY_RUN="1")
+    assert few.returncode != 0 and "3 of 12 training tasks" in few.stderr
+
+
+def test_quickstart_wants_the_judge_of_a_transform_that_asks(built: Path) -> None:
+    unset = _run(["bash", "scripts/quickstart.sh"], built, PRL_SITE="_test_qs_pbs", DRY_RUN="1",
+                 PRL_JUDGE_API_BASE="https://<provider>/v1")
+    assert unset.returncode != 0 and "atlas_signed asks a judge" in unset.stderr
+    (built / "ext" / "private" / "judge_api_key").unlink()
+    nokey = _run(["bash", "scripts/quickstart.sh"], built, PRL_SITE="_test_qs_pbs", DRY_RUN="1", TRANSFORM="rewrite")
+    assert nokey.returncode != 0 and "rewrite asks a judge" in nokey.stderr
+    # no model call: no judge needed
+    plain = _run(["bash", "scripts/quickstart.sh"], built, PRL_SITE="_test_qs_pbs", DRY_RUN="1",
+                 TRANSFORM="reroll_smoke", PRL_JUDGE_API_BASE="https://<provider>/v1")
+    assert plain.returncode == 0, plain.stderr
+
+
+def test_quickstart_runs_your_transform_on_the_transform_arm(built: Path) -> None:
+    tmp_path = built
     out = _run(["bash", "scripts/quickstart.sh"], tmp_path, PRL_SITE="_test_qs_pbs", DRY_RUN="1",
                TRANSFORM="atlas", PRL_RUN_ID="mine")
     assert out.returncode == 0, out.stderr
@@ -63,7 +118,8 @@ def test_quickstart_runs_your_transform_on_the_transform_arm(tmp_path: Path) -> 
     assert missing.returncode != 0 and "no transforms/no_such_transform.py" in missing.stderr
 
 
-def test_quickstart_ppo_needs_its_own_smoke(tmp_path: Path) -> None:
+def test_quickstart_ppo_needs_its_own_smoke(built: Path) -> None:
+    tmp_path = built
     out = _run(["bash", "scripts/quickstart.sh"], tmp_path, PRL_SITE="_test_qs_pbs", DRY_RUN="1",
                TRANSFORM="atlas", ALGO="ppo")
     assert out.returncode != 0 and "CHAIN=smoke_ppo first" in out.stderr
