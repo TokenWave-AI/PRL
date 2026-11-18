@@ -62,20 +62,24 @@ find_smoke() {
 # ($MILES_IMAGE) on this node's NVMe, owned by us; scripts/lib/env.sh and the launchers then use the directory
 sandbox() {
   local sif=${PRL_SIF:=$MILES_IMAGE}
-  local sb=$PRL_SCRATCH/sandbox_$(basename "$sif" .sif)
+  local sb=$PRL_SCRATCH/sandbox_$(basename "$sif" .sif) log=$PRL_SCRATCH/sandbox_build.log
   if [ ! -d "$sb" ]; then
     mkdir -p "$PRL_SCRATCH/stmp"
-    if [ "${PRL_SANDBOX_UNSQUASH:-0}" = 1 ]; then
+    # both names: the site's apptainer wrapper copies APPTAINER_TMPDIR (configs/sites, not yet created) over the other
+    if [ "${PRL_SANDBOX_UNSQUASH:-0}" != 1 ] && APPTAINER_TMPDIR=$PRL_SCRATCH/stmp SINGULARITY_TMPDIR=$PRL_SCRATCH/stmp \
+        apptainer build --sandbox "$sb" "$sif" > "$log" 2>&1; then
+      :
+    else
       # Where build --sandbox stops at the pulled image's /.singularity.d/runscript symlink ("file exists", seen with
-      # SingularityCE on aarch64 nodes): unpack its squashfs partition directly (files become ours, so /root is
-      # readable)
+      # SingularityCE on aarch64 nodes), or PRL_SANDBOX_UNSQUASH=1: unpack its squashfs partition directly (files
+      # become ours, so /root is readable)
+      if [ "${PRL_SANDBOX_UNSQUASH:-0}" != 1 ]; then
+        tail -5 "$log"; echo "[$PRL_SITE] build --sandbox failed: unpacking the image with unsquashfs instead"
+      fi
+      rm -rf "$sb"
       local offset; offset=$(apptainer sif list "$sif" | awk -F'|' '/Squashfs/ {split($4, p, "-"); print p[1] + 0}')
       unsquashfs -q -n -no-xattrs -o "${offset:?no squashfs partition in $sif}" -d "$sb" "$sif" \
-        > "$PRL_SCRATCH/sandbox_build.log" 2>&1 || { tail -20 "$PRL_SCRATCH/sandbox_build.log"; rm -rf "$sb"; return 1; }
-    else
-      # both names: the site's apptainer wrapper copies APPTAINER_TMPDIR (configs/sites, not yet created) over the other
-      APPTAINER_TMPDIR=$PRL_SCRATCH/stmp SINGULARITY_TMPDIR=$PRL_SCRATCH/stmp apptainer build --sandbox "$sb" "$sif" \
-        > "$PRL_SCRATCH/sandbox_build.log" 2>&1 || { tail -20 "$PRL_SCRATCH/sandbox_build.log"; return 1; }
+        > "$log" 2>&1 || { tail -20 "$log"; rm -rf "$sb"; return 1; }
     fi
   fi
   export MILES_IMAGE=$sb
@@ -255,7 +259,11 @@ archive_job_trials() {
 run_chain() {
   mkdir -p "$PRL_EXT/logs" "$PRL_EXT/locks"
   exec > >(tee -a "$PRL_EXT/logs/${PRL_CHAIN:?}_$JOB_ID.log") 2>&1
-  trap 'archive_job_trials' EXIT
+  local tee_pid=$!
+  # at the end, tee gets its last lines into the log before the job's processes go (a scheduler stops what is left
+  # when the job script ends: a step failing early lost its error from the log, the scheduler's own output kept it);
+  # at most 5 s, in case a background process still holds the pipe
+  trap 'archive_job_trials; exec >&- 2>&-; for _ in 1 2 3 4 5 6 7 8 9 10; do kill -0 '"$tee_pid"' 2>/dev/null || break; sleep 0.5; done' EXIT
   trap 'exit 143' TERM  # so that the EXIT trap also runs when the scheduler stops the job
   echo "[$PRL_SITE] job $JOB_ID chain $PRL_CHAIN on $(hostname) at $(date); scratch $PRL_SCRATCH"
   nvidia-smi --query-gpu=name,memory.total --format=csv,noheader

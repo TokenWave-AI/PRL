@@ -155,3 +155,27 @@ def test_the_interface_reaches_the_head_container_and_the_workers() -> None:
     worker = (ROOT / "scripts" / "lib" / "chain_worker.sh").read_text()
     assert "NCCL_SOCKET_IFNAME='${NCCL_SOCKET_IFNAME:-$PRL_NODE_IFACE}'" in worker
     assert "GLOO_SOCKET_IFNAME='${GLOO_SOCKET_IFNAME:-$PRL_NODE_IFACE}'" in worker
+
+
+def _proxies(tmp_path, **env: str) -> list[str]:
+    """The block of scripts/lib/container_main.sh that names an http:// proxy by its address, run on its own with a
+    fake getent (proxy.site -> 10.0.0.9; anything else unknown)."""
+    lines = (ROOT / "scripts" / "lib" / "container_main.sh").read_text().splitlines()
+    start = next(i for i, line in enumerate(lines) if line.startswith("for v in https_proxy HTTPS_PROXY"))
+    block = "\n".join(lines[start:lines.index("done", start) + 1])
+    fake = tmp_path / "getent"
+    fake.write_text('#!/bin/bash\n[ "$2" = proxy.site ] && echo "10.0.0.9      STREAM proxy.site"\n')
+    fake.chmod(0o755)
+    out = subprocess.run(["bash", "-c", "set -euo pipefail\n" + block + '\necho "${https_proxy:-}|${http_proxy:-}|${HTTPS_PROXY:-}"'],
+                         capture_output=True, text=True, check=True, env={"PATH": f"{tmp_path}:/usr/bin:/bin", **env})
+    return out.stdout.strip().split("|")
+
+
+def test_an_http_proxy_is_named_by_its_address(tmp_path) -> None:
+    assert _proxies(tmp_path, https_proxy="http://proxy.site:3128", http_proxy="http://u:p@proxy.site:3128/") == [
+        "http://10.0.0.9:3128", "http://u:p@10.0.0.9:3128/", ""]
+    # unknown names, addresses already, https:// proxies (TLS to the proxy needs its name) and no proxy stay
+    assert _proxies(tmp_path, https_proxy="http://other.site:8080", HTTPS_PROXY="https://proxy.site:443") == [
+        "http://other.site:8080", "", "https://proxy.site:443"]
+    assert _proxies(tmp_path, https_proxy="http://172.23.1.9:3128") == ["http://172.23.1.9:3128", "", ""]
+    assert _proxies(tmp_path) == ["", "", ""]

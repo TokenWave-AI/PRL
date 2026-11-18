@@ -20,6 +20,17 @@ node_addrs=$( { hostname -I 2>/dev/null || python3 -c 'import socket; print(*soc
   2>/dev/null || true; } | tr ' ' '\n' | sed '/^$/d' | paste -sd, -)
 export no_proxy=127.0.0.1,localhost,::1,$(uname -n)${node_addrs:+,$node_addrs}${no_proxy:+,$no_proxy}
 export NO_PROXY=$no_proxy
+# The e2b SDK's transport resolves the proxy's host name with its own resolver: where that reaches no DNS server (a site's
+# compute nodes) every new connection to a sandbox waits ~15 s first. An http:// proxy by its address (the system's
+# resolver), credentials kept; xtrace off so that they do not go to the log.
+{ set +x; } 2>/dev/null
+for v in https_proxy HTTPS_PROXY http_proxy HTTP_PROXY; do
+  [[ ${!v:-} =~ ^http://([^/@]*@)?([^:/@]+)(.*)$ ]] || continue
+  proxy_user=${BASH_REMATCH[1]} proxy_host=${BASH_REMATCH[2]} proxy_rest=${BASH_REMATCH[3]}
+  proxy_ip=$(getent ahostsv4 "$proxy_host" 2>/dev/null | awk '{print $1; exit}') || true
+  if [ -n "$proxy_ip" ]; then export "$v=http://$proxy_user$proxy_ip$proxy_rest"; fi
+done
+set -x
 # Ray kills workers at 95% node memory by default; colocated 4B on a GH200 node peaks near that (host offload).
 # On GH200 the GPU's HBM is exposed as a system NUMA node, so Ray's monitor counts GPU allocations as host
 # memory and OOM-kills the trainer at the first colocated train step (process RSS was only ~80 GB). Disabled

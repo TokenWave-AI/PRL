@@ -67,6 +67,7 @@ def test_quickstart_submits_signed_atlas_in_one_job(built: Path) -> None:
     out = _run(["bash", "scripts/quickstart.sh"], tmp_path, PRL_SITE="_test_qs_pbs", DRY_RUN="1")
     assert out.returncode == 0, out.stderr
     assert out.stdout.startswith("qsub ")
+    assert f"{tmp_path}/ext/logs/prepare+download+convert+smoke+train_eval_<job id>.log" in out.stderr
     for part in ("PRL_CHAIN=prepare+download+convert+smoke+train_eval", "SMOKE_ARM=ota_train_smoke_noturncap",
                  "ARM=ota_train_atlas_signed", "ALGO=grpo", "PRL_RUN_ID=quickstart", "TRANSFORM=atlas_signed",
                  "PRL_TRANSFORM_ARGS_FILE=", "walltime=168:00:00"):
@@ -82,7 +83,8 @@ def test_quickstart_follows_the_sandboxes_built(tmp_path: Path) -> None:
     tried = _run(["bash", "scripts/quickstart.sh"], tmp_path, PRL_SITE="_test_qs_pbs", DRY_RUN="1")
     assert tried.returncode == 0, tried.stderr
     assert "trying atlas_signed on the smoke's 8" in tried.stderr
-    for part in ("PRL_CHAIN=prepare+download+convert+smoke_grpo,", "ARM=ota_train_smoke_transform",
+    assert f"{tmp_path}/ext/runs/grpo_ota_train_smoke_<job id>/train.log" in tried.stderr
+    for part in ("PRL_CHAIN=prepare+download+convert+smoke_grpo,", "ARM=ota_train_smoke_atlas_signed,",
                  "TRANSFORM=atlas_signed", "PRL_TRANSFORM_ARGS_FILE=", "walltime=08:00:00"):
         assert part in tried.stdout, part
     assert "train_eval" not in tried.stdout
@@ -191,6 +193,29 @@ def test_a_smoke_checks_its_tasks_once_when_the_snapshot_has_no_result(tmp_path:
     assert f"PRL_TASK_PROMPTS={snapshot}/smoke.jsonl" in calls[-1]
     again = _contract(tmp_path, 1)  # the result is there: nothing runs
     assert again.returncode == 0 and len((tmp_path / "apptainer.log").read_text().splitlines()) == 2
+
+
+def test_the_image_is_unsquashed_where_build_sandbox_fails(tmp_path: Path) -> None:
+    """SingularityCE on aarch64: build --sandbox stops at the image's runscript symlink; sandbox() unpacks it instead."""
+    bin_ = tmp_path / "bin"
+    bin_.mkdir()
+    (bin_ / "apptainer").write_text(
+        "#!/bin/bash\ncase $1 in\n"
+        "  build) mkdir -p \"$3\"; echo 'FATAL:   While performing build: packer failed to pack: symlinkat "
+        "/.singularity.d/runscript singularity: file exists' >&2; exit 255 ;;\n"
+        "  sif) echo '4   |1       |none    |53248-17336209408        |FS (Squashfs/*System/arm64)' ;;\nesac\n")
+    (bin_ / "unsquashfs").write_text("#!/bin/bash\n" + f'echo "$*" > {tmp_path}/unsquashfs.args\n'
+                                       'while [ $# -gt 1 ]; do [ "$1" = -d ] && mkdir -p "$2/opt"; shift; done\n')
+    for f in ("apptainer", "unsquashfs"):
+        (bin_ / f).chmod(0o755)
+    script = ("set -euo pipefail; set -a; source configs/sites/" + "_test_qs_local.env; set +a; source scripts/lib/chain.sh; "
+              "sandbox; echo \"image=$MILES_IMAGE\"")
+    out = _run(["bash", "-c", script], tmp_path, PRL_ROOT=str(ROOT), PRL_SITE="_test_qs_local", JOB_ID="7")
+    assert out.returncode == 0, out.stderr
+    assert "file exists" in out.stdout and "unpacking the image with unsquashfs instead" in out.stdout
+    sb = tmp_path / "scratch" / "sandbox_miles"
+    assert f"image={sb}" in out.stdout and (sb / "opt").is_dir()
+    assert (tmp_path / "unsquashfs.args").read_text().split()[:5] == ["-q", "-n", "-no-xattrs", "-o", "53248"]
 
 
 def test_quickstart_scripts_are_plain_bash() -> None:

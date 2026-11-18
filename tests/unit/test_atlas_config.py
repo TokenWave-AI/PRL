@@ -37,3 +37,11 @@ def test_signed_atlas_arm_is_the_transform_arm_with_a_low_effort_judge() -> None
     assert signed["PRL_TRANSFORM"] == "atlas_signed" and signed["PRL_JUDGE_MODEL"] == tf["PRL_JUDGE_MODEL"]
     assert signed["RUN_DIR"].endswith("/runs/grpo_ota_train_tf_atlas_signed_r1")
     assert (signed["ROLLOUT_BATCH"], signed["NUM_ROLLOUT"]) == ("32", "68") and "HARBOR_AGENT_MAX_ITERATIONS" not in signed
+
+
+def test_signed_atlas_smoke_arm_is_the_transform_smoke_with_a_low_effort_judge() -> None:
+    smoke = arm_env("ota_train_smoke_transform", TRANSFORM="atlas_signed", JOB_ID="7")
+    signed = arm_env("ota_train_smoke_atlas_signed", JOB_ID="7")
+    assert diff(smoke, signed) == {"PRL_JUDGE_EXTRA_BODY"}
+    assert json.loads(signed["PRL_JUDGE_EXTRA_BODY"]) == {"reasoning_effort": "low"}
+    assert signed["PRL_TRANSFORM"] == "atlas_signed"

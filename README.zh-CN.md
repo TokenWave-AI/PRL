@@ -41,7 +41,7 @@ async def atlas(traj: Trajectory, other_weight: float = 0.0) -> Trajectory:
     # 1. 问判官：把整条轨迹写成 prompt，判官回答哪几步是关键步。
     critical = await labeler.label(traj)
 
-    # 2. 留记录：之后在 transform.json 里能看到每条轨迹判官选了哪几步
+    # 2. 留记录：之后在 transform.json 里能看到每条轨迹判官选了哪几步（从 1 数，和它的 prompt 一致）
     traj.record["atlas"] = {"steps": len(traj.steps),
                             "critical": None if critical is None else sorted(n + 1 for n in critical)}
 
@@ -164,13 +164,13 @@ PRL_SITE=<site> TRANSFORM=atlas bash scripts/quickstart.sh          # transforms
 
 - 改参数：`PRL_TRANSFORM_ARGS='{"other_weight": 0.3}'`；换算法：`ALGO=reinforce_plus_plus`（`ALGO=ppo` 要先跑它自己的烟测，见 [`CONTRIBUTING.md`](CONTRIBUTING.md)）；串联：`TRANSFORM=rewrite+atlas`（按顺序执行；用 `+` 不用逗号，因为提交命令按逗号切分变量）。
 - 判官用站点配置里的；58.09% 那次用的是 gpt-6.1-sol，reasoning effort 是 signed ATLAS 的 arm 默认的 low（`PRL_JUDGE_EXTRA_BODY`）。
-- 每次更新在这次运行的 `train.log`（`$PRL_EXT/runs/<run>/`）里记一行 `step N: {'train/loss': ...}`；TB-dev 分数是评测那份 `train.log` 里的 `eval/heldout`。作业到时限被停掉的话，再运行同一条命令会接着跑。
+- 命令会打印日志在哪里。每次更新在这次运行的 `train.log`（`$PRL_EXT/runs/<run>/`）里记一行 `step N: {'train/loss': ...}`；transform 对每条轨迹做了什么，各有一行 `[prl] transform <名字> on <轨迹>: ok; <保留>/<全部> trained tokens kept`（`[prl] step weights: ...` 只统计步骤权重，不含 mask）；TB-dev 分数是评测那份 `train.log` 里的 `eval/heldout`。完整训练到时限被停掉的话，再运行同一条命令会接着跑。
 
 **一次性配置：两步**（细节见 [`docs/setup.md`](docs/setup.md)）。
 
 | # | 步骤 | 命令 |
 |---|---|---|
-| 1 | 站点配置：调度器（PBS、PJM 或不用调度器）、一个工作目录、一个兼容 E2B 的沙盒服务和它拉镜像的 registry、判官（任何 OpenAI 兼容接口） | `cp configs/sites/example.env configs/sites/<site>.env`，填好最上面一段 |
+| 1 | 站点配置：调度器（PBS、PJM 或不用调度器）、一个工作目录、一个兼容 E2B 的沙盒服务和它拉镜像的 registry、判官（任何 OpenAI 兼容接口） | `cp configs/sites/example.env configs/sites/<site>.env`，填好最上面一段（用 SingularityCE 而不是 Apptainer，或者机器上 Python < 3.10：再看 "Only for some sites" 一段） |
 | 2 | 沙盒：每个任务一个镜像和一个 template，在一台有 Docker 的机器上 | `PRL_SITE=<site> bash scripts/setup/build_sandboxes.sh` |
 
 想先快速试一下：第 2 步加 `PRL_SANDBOX_SMOKE_ONLY=1` 只建 8 个任务，同一条命令就改成在这 8 个任务上试 transform（2 次更新，约 30 分钟），不做完整训练。
@@ -201,10 +201,10 @@ PRL_TRANSFORM=my_transform MODEL_HF_DIR=tokenizer \
 PRL_TRANSFORM_CHECK_OUT=/tmp/check python -m prl.transforms.check
 ```
 
-函数要问模型的话，用站点配置里的判官：先运行 `set -a; source configs/sites/<site>.env; set +a`。
+函数要问模型的话，用站点配置里的判官：先运行 `set -a; source configs/sites/<site>.env; set +a`（不在集群上运行时，在这之前 `export PRL_JUDGE_KEY_FILE=<本机的 key 文件>`）。快速开始默认训练的是 `PRL_TRANSFORM=atlas_signed PRL_TRANSFORM_ARGS='{"failed_good_weight": 0.0}'`。
 
 - 终端里每条轨迹一行：`[transform check] <轨迹>: reward <分数>, <步数> steps, <状态>, steps changed: <如 5 weighted, 2 masked>, trained tokens <改前> -> <改后>, <秒数> s`，
-  状态是 `ok` 或 `skipped`。最后一行是 `passed` 为通过；出错时打印 `FAILED`、出错的轨迹和原因。
+  状态是 `ok` 或 `skipped`（中间夹着框架自己的日志行 `[prl] transform ... trained tokens kept`，问判官时还有它的 HTTP 请求）。最后一行是 `passed` 为通过；出错时打印 `FAILED`、出错的轨迹和原因。
 - 输出目录里每条轨迹一个子目录：`transform.json` 是框架的记录（每个函数的状态和用时、你写进 `traj.record` 的内容、
   改了哪些步骤，如 `weighted_steps` {步骤: 新权重}、可训练 token 改前 / 改后的数量），`transform_calls.json` 是每次 `ask` 的请求和回答（ATLAS 判官的在 `atlas_labels.json`）；`summary.json` 汇总全部 8 条。
 

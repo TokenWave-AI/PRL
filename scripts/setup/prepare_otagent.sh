@@ -20,7 +20,7 @@ D=$PRL_EXT/data; mkdir -p "$D"
 if [ -e "$MILES_IMAGE" ]; then run_py() { in_miles bash -c "cd $PRL_ROOT && $*"; }; HF=hf
 else run_py() { bash -c "cd $PRL_ROOT && $*"; }; HF=${HF_CLI:-hf}; fi   # e.g. HF_CLI=<venv>/bin/hf
 PY=${PREP_PYTHON:-python3}; [ -e "$MILES_IMAGE" ] && PY=python3
-echo "== 1. weights -> $HF_HOME/hub"
+[ -z "$MODELS" ] || echo "== 1. weights -> $HF_HOME/hub"
 for m in $MODELS; do
   if ls -d "$HF_HOME/hub/models--${m//\//--}"/snapshots/*/config.json >/dev/null 2>&1; then echo "   $m present"; else
     run_py "$HF download $m >/dev/null && echo '   $m downloaded'"; fi

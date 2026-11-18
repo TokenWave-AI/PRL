@@ -37,6 +37,10 @@ if grep -qE '(^|[^a-z_])ask\(|labeler\.' $(printf 'transforms/%s.py ' ${TRANSFOR
   echo "$TRANSFORM asks a judge: set PRL_JUDGE_API_BASE, PRL_JUDGE_MODEL and the key file PRL_JUDGE_KEY_FILE in" \
        "configs/sites/$PRL_SITE.env" >&2; exit 1
 fi
+follow() {  # RUN: the run's directory under runs/ (the arm's RUN_DIR)
+  echo "[quickstart] the job's log: $(profile PRL_EXT)/logs/${CHAIN}_<job id>.log (a line per step); each update:" \
+       "a line step N: {'train/loss': ...} in $(profile PRL_EXT)/runs/$1/train.log" >&2
+}
 # the training snapshot's templates (configs/arms/common_ota.env reads the same PRL_TRAIN_SNAPSHOT)
 snapshot=$(profile PRL_TRAIN_SNAPSHOT); snapshot=${snapshot:-$(profile PRL_EXT)/task_snapshots/otagent728}
 build="PRL_SITE=$PRL_SITE bash scripts/setup/build_sandboxes.sh"
@@ -48,9 +52,11 @@ if [ "$ready" -lt "$tasks" ]; then
   [ "$ALGO" = grpo ] || { echo "ALGO=$ALGO trains on all $tasks tasks, $ready have a template: $build" >&2; exit 1; }
   echo "$ready of $tasks training tasks have a sandbox template: trying $TRANSFORM on the smoke's 8 (2 updates, about" \
        "30 min) instead of training; for the full run: $build" >&2
-  [ "$TRANSFORM" != atlas_signed ] || export PRL_TRANSFORM_ARGS=${PRL_TRANSFORM_ARGS:-'{"failed_good_weight": 0.0}'}
+  if [ "$TRANSFORM" = atlas_signed ]; then  # its judge at low effort, as in the full run
+    export ARM=${ARM:-ota_train_smoke_atlas_signed} PRL_TRANSFORM_ARGS=${PRL_TRANSFORM_ARGS:-'{"failed_good_weight": 0.0}'}
+  fi
   export CHAIN=prepare+download+convert+smoke_grpo
-  exec bash scripts/submit.sh
+  follow 'grpo_ota_train_smoke_<job id>'; exec bash scripts/submit.sh
 fi
 if [ "$TRANSFORM" = atlas_signed ]; then
   export ARM=${ARM:-ota_train_atlas_signed} PRL_TRANSFORM_ARGS=${PRL_TRANSFORM_ARGS:-'{"failed_good_weight": 0.0}'}
@@ -58,4 +64,4 @@ else
   export ARM=${ARM:-ota_train_transform}   # e.g. ARM=ota_train_transform_reroll for a transform that rerolls
 fi
 export CHAIN=prepare+download+convert${SMOKE_ARM:++smoke}+train_eval
-exec bash scripts/submit.sh
+follow "*_$PRL_RUN_ID"; exec bash scripts/submit.sh

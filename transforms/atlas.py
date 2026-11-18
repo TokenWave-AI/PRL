@@ -4,7 +4,8 @@ A judge model marks the trial's critical steps (prl/algo/labeler.py, configured 
 steps leave the loss (``other_weight`` 0, the default: hard mask) or have their advantage scaled by ``other_weight``
 (ATLAS-soft, e.g. PRL_TRANSFORM_ARGS='{"other_weight": 0.3}'). A trial the judge could not label (HTTP
 errors, unparsable answers after the retries) is skipped: it trains with all its steps, as plain GRPO. The judge's
-request and answer are in ``<trial_dir>/atlas_labels.json``; the critical steps also in ``traj.record["atlas"]``.
+request and answer are in ``<trial_dir>/atlas_labels.json``; the critical steps also in ``traj.record["atlas"]``
+(numbered from 1, as in the judge's prompt and atlas_labels.json; ``step.index`` counts from 0).
 """
 
 from __future__ import annotations
