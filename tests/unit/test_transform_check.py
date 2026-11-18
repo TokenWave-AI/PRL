@@ -61,8 +61,8 @@ def test_passes_and_records(fixture, tmp_path):
 
     select(keep_first)
     summary = _check(path, tmp_path)
-    assert [(r["trial"], r["status"], r["trained_tokens"]) for r in summary["trials"]] == [
-        ("ok_trial", ["ok"], [3, 1]), ("fail_trial", ["ok"], [2, 1])]
+    assert [(r["trial"], r["status"], r["trained_tokens"], r["changed_steps"]) for r in summary["trials"]] == [
+        ("ok_trial", ["ok"], [3, 1], {"masked": [1]}), ("fail_trial", ["ok"], [2, 1], {"masked": [1]})]
     assert json.loads((tmp_path / "out" / "summary.json").read_text())["transform"] == "t"
     assert (tmp_path / "out" / "ok_trial" / "transform.json").exists()
 
@@ -87,3 +87,18 @@ def test_the_shipped_trials_are_readable():
     assert len(data["trials"]) == 8 and {t["reward"] for t in data["trials"]} == {0.0, 1.0}
     assert any(len(t["samples"]) > 1 for t in data["trials"])  # one trial split by a summary
     assert all(seg["trained"] in (0, 1) for t in data["trials"] for leaf in t["samples"] for seg in leaf["response"])
+
+
+def test_the_line_names_weight_changes(fixture, tmp_path, monkeypatch, capsys):
+    path, select = fixture
+
+    def push_down(traj):
+        traj.steps[0].weight = -1.0  # trained tokens stay as they are: only the line's step counts show it
+
+    select(push_down)
+    monkeypatch.setattr(check, "Tokenizer", lambda _: CharTokenizer())
+    monkeypatch.setenv("MODEL_HF_DIR", "unused")
+    monkeypatch.setenv("PRL_TRANSFORM_CHECK_OUT", str(tmp_path / "out"))
+    monkeypatch.setenv("PRL_TRANSFORM_FIXTURE", str(path))
+    assert check.main() == 0
+    assert "ok_trial: reward 1.0, 2 steps, ok, steps changed: 1 weighted, trained tokens 3 -> 3" in capsys.readouterr().out

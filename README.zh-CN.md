@@ -198,10 +198,10 @@ PRL_TRANSFORM_CHECK_OUT=/tmp/check python -m prl.transforms.check
 
 怎么看结果：
 
-- 终端里每条轨迹一行：`[transform check] <轨迹>: reward <分数>, <步数> steps, <状态>, trained tokens <改前> -> <改后>, <秒数> s`，
+- 终端里每条轨迹一行：`[transform check] <轨迹>: reward <分数>, <步数> steps, <状态>, steps changed: <如 5 weighted, 2 masked>, trained tokens <改前> -> <改后>, <秒数> s`，
   状态是 `ok` 或 `skipped`。最后一行是 `passed` 为通过；出错时打印 `FAILED`、出错的轨迹和原因。
 - 输出目录里每条轨迹一个子目录：`transform.json` 是框架的记录（每个函数的状态和用时、你写进 `traj.record` 的内容、
-  可训练 token 改前 / 改后的数量），`transform_calls.json` 是每次 `ask` 的请求和回答（ATLAS 判官的在 `atlas_labels.json`）；`summary.json` 汇总全部 8 条。
+  改了哪些步骤，如 `weighted_steps` {步骤: 新权重}、可训练 token 改前 / 改后的数量），`transform_calls.json` 是每次 `ask` 的请求和回答（ATLAS 判官的在 `atlas_labels.json`）；`summary.json` 汇总全部 8 条。
 
 **③ 训练 + 评测：一条命令。** 
 

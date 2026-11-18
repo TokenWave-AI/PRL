@@ -174,7 +174,7 @@ from the critic).
 | Check before the run | every training job first runs your function on 8 recorded trajectories (model calls included); if it raises, returns an invalid result, hangs or skips them all, the job stops before training |
 | Failures | a failure on one trajectory: it trains as it was and the reason is recorded; 32 failures in a row: training stops, so that it does not silently turn into plain GRPO |
 | Consistency checks | every sample passes Miles' checks (tokens, loss mask, logprobs, length); the reward changes only if you wrote `traj.reward`; a sample with no trainable token is dropped |
-| Records | `transform.json` per trajectory: each function's status and time, the steps it changed, the reward before / after, the trainable tokens before / after; matching `rollout/*` metrics in the training log |
+| Records | `transform.json` per trajectory: each function's status and time, the steps it changed (`weighted_steps` {step: new weight}, `masked_steps`, `token_weighted_steps`, `rewritten_steps`, `deleted_steps`, `reroll_steps`), the reward before / after, the trainable tokens before / after; matching `rollout/*` metrics in the training log |
 | Framework smoke | needed once after the framework code changes (two updates, about half an hour); it writes a receipt, and training jobs find the receipt that matches the current code |
 
 ## 5. Settings

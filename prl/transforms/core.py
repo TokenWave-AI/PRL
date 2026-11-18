@@ -27,9 +27,10 @@ Configuration (env; scripts/run.sh forwards PRL_TRANSFORM*):
                                    it the trial trains unchanged (error). The pre-run check uses the same limit
 
 Records: every kept sample of the trial gets ``metadata["prl_transform"]`` and the trial dir ``transform.json``:
-per transform its status (``ok`` / ``skipped`` / ``error``), reason, seconds, ``traj.record``, the rewritten and deleted
-steps and the reward before and after; trained tokens before and after; whether tokens changed; the samples dropped
-(left without a trained token).
+per transform its status (``ok`` / ``skipped`` / ``error``), reason, seconds, ``traj.record``, the steps it changed
+(``rewritten_steps`` / ``deleted_steps``, ``masked_steps``, ``weighted_steps`` {step: new weight},
+``token_weighted_steps`` (weight_text), ``reroll_steps``) and the reward before and after; trained tokens before and
+after; whether tokens changed; the samples dropped (left without a trained token).
 """
 
 from __future__ import annotations
@@ -256,6 +257,14 @@ async def run(samples: list[Any], tokenizer: Any, args: Any = None, strict: bool
                 if rewritten:
                     entry["rewritten_steps"] = rewritten
                     entry["deleted_steps"] = [s.index for s in traj.steps if s.deleted]
+                # what this function decided, against the steps as it got them (_state: weight, masked, ...)
+                live = [(s, was) for s, was in zip(traj.steps, traj._initial) if not s.deleted]
+                if masked := [s.index for s, was in live if s.masked and not was[1]]:
+                    entry["masked_steps"] = masked
+                if weighted := {str(s.index): float(s.weight) for s, was in live if not s.masked and s.weight != was[0]}:
+                    entry["weighted_steps"] = weighted
+                if spanned := [s.index for s, _ in live if s._spans]:
+                    entry["token_weighted_steps"] = spanned
                 entry["status"] = "ok"
         except Unanswered as exc:  # the model gave nothing usable: as traj.skip
             samples = original

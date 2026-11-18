@@ -198,10 +198,10 @@ A function that asks a model reads the judge settings from the environment here:
 
 Reading the result:
 
-- The terminal shows one line per trajectory: `[transform check] <trajectory>: reward <reward>, <steps> steps, <status>, trained tokens <before> -> <after>, <seconds> s`,
+- The terminal shows one line per trajectory: `[transform check] <trajectory>: reward <reward>, <steps> steps, <status>, steps changed: <e.g. 5 weighted, 2 masked>, trained tokens <before> -> <after>, <seconds> s`,
   where the status is `ok` or `skipped`. A last line `passed` means it passed; otherwise it prints `FAILED`, the trajectory and the reason.
 - The output directory has one subdirectory per trajectory: `transform.json` is the framework's record (each function's status and time, what you wrote into `traj.record`,
-  the trainable tokens before / after) and `transform_calls.json` every `ask` request and answer (the ATLAS judge's: `atlas_labels.json`); `summary.json` sums up all 8.
+  the steps it changed, e.g. `weighted_steps` {step: new weight}, the trainable tokens before / after) and `transform_calls.json` every `ask` request and answer (the ATLAS judge's: `atlas_labels.json`); `summary.json` sums up all 8.
 
 **③ Train and evaluate: one command.**
 

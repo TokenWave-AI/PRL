@@ -42,3 +42,4 @@ What a site needs:
   (2 updates on 8 tasks); later runs of the same code skip these.
 - `DRY_RUN=1` prints the scheduler command and submits nothing; `ELAPSE=hh:mm:ss` sets a job's time limit. Job logs are
   in `$PRL_EXT/logs/`; each run's `train.log` (in `$PRL_EXT/runs/<run>/`) has a line per update, `step N: {'train/loss': ...}`.
+  SGLang's `post-warmup freeze_gc failed` with a `Connection refused` traceback at the start is harmless.

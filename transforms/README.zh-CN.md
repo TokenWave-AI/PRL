@@ -154,7 +154,7 @@ TRANSFORM=branch PRL_TRANSFORM_ARGS='{"select": "first_bad", "allocate": {"name"
 | 开跑前检查 | 训练作业开头在 8 条录好的轨迹上跑你的函数（包括模型调用）；报错、返回非法结果、卡住、全部跳过，作业在训练前停下 |
 | 失败兜底 | 某条轨迹上失败 → 照原样训练并记录原因；连续 32 条失败 → 训练停下，避免悄悄退化成原生 GRPO |
 | 一致性检查 | 每个样本过 Miles 的校验（token、loss mask、logprob、长度）；分数只在你写了 `traj.reward` 时变；没有可训练 token 的样本丢掉 |
-| 记录 | 每条轨迹 `transform.json`：每个函数的状态、用时、改了哪些步、分数前后、可训练 token 前后；训练日志里有对应的 `rollout/*` 指标 |
+| 记录 | 每条轨迹 `transform.json`：每个函数的状态、用时、改了哪些步（`weighted_steps` {步骤: 新权重}、`masked_steps`、`token_weighted_steps`、`rewritten_steps`、`deleted_steps`、`reroll_steps`）、分数前后、可训练 token 前后；训练日志里有对应的 `rollout/*` 指标 |
 | 框架烟测 | 框架代码变了以后要跑一次（两次更新，约半小时），生成收据；训练作业自动找匹配当前代码的收据 |
 
 ## 5. 配置

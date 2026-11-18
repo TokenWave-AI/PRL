@@ -93,6 +93,20 @@ def test_mask_and_weights_are_written_back(use, tmp_path):
     assert record["chain"][0]["status"] == "ok" and record["chain"][0]["record"] == {"note": "x"}
     assert (record["trained_tokens_before"], record["trained_tokens_after"], record["tokens_changed"]) == (4, 3, False)
     assert record["dropped_samples"] == 1
+    entry = record["chain"][0]
+    assert (entry["weighted_steps"], entry["masked_steps"]) == ({"1": 0.5}, [2]) and "token_weighted_steps" not in entry
+
+
+def test_the_record_names_only_what_this_function_changed(monkeypatch):
+    weights = {"first": (lambda traj: setattr(traj.steps[0], "weight", -1.0)),
+               "same": (lambda traj: setattr(traj.steps[0], "weight", -1.0)),
+               "span": (lambda traj: traj.steps[1].weight_text("BB", 0.0))}
+    monkeypatch.setattr(core, "_resolve", lambda name: weights[name])
+    monkeypatch.setenv("PRL_TRANSFORM", "first,same,span")
+    chain = _run(_trial())[0].metadata["prl_transform"]["chain"]
+    # the second sets the weight the first left: no change of its own
+    assert [(e.get("weighted_steps"), e.get("token_weighted_steps")) for e in chain] == [
+        ({"0": -1.0}, None), (None, None), (None, [1])]
 
 
 def test_weights_follow_the_runs_left_after_masking(use):
