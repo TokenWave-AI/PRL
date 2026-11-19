@@ -5,13 +5,13 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="theme-color" content="#FFFFFF">
   <meta name="description" content="PRL is programmable infrastructure for Agentic RL. Shape training experience with Reweight, Rewrite, and Reroll, all from a Python function.">
-  <link rel="canonical" href="https://huangtubaye233.github.io/tw-prl/">
+  <link rel="canonical" href="https://tokenwave-ai.github.io/PRL/">
   <link rel="icon" href="favicon.svg" type="image/svg+xml">
   <meta property="og:type" content="article">
   <meta property="og:title" content="PRL · Program how agents learn.">
   <meta property="og:description" content="PRL is programmable infrastructure for Agentic RL. Shape training experience with Reweight, Rewrite, and Reroll, all from a Python function.">
-  <meta property="og:url" content="https://huangtubaye233.github.io/tw-prl/">
-  <meta property="og:image" content="https://huangtubaye233.github.io/tw-prl/media/prl-poster.jpg">
+  <meta property="og:url" content="https://tokenwave-ai.github.io/PRL/">
+  <meta property="og:image" content="https://tokenwave-ai.github.io/PRL/media/prl-poster.jpg">
   <meta property="og:image:width" content="3840">
   <meta property="og:image:height" content="2160">
   <meta name="twitter:card" content="summary_large_image">
@@ -623,19 +623,19 @@ Your next transform.</h2><a href="#resources" class="button solid">Explore PRL <
       "id": "github",
       "titleKey": "resource1Title",
       "bodyKey": "resource1Body",
-      "url": "https://github.com/Huangtubaye233/prl"
+      "url": "https://github.com/TokenWave-AI/PRL"
     },
     {
       "id": "docs",
       "titleKey": "resource2Title",
       "bodyKey": "resource2Body",
-      "url": "https://github.com/Huangtubaye233/prl/blob/main/transforms/README.md"
+      "url": "https://github.com/TokenWave-AI/PRL/blob/main/transforms/README.md"
     },
     {
       "id": "examples",
       "titleKey": "resource3Title",
       "bodyKey": "resource3Body",
-      "url": "https://github.com/Huangtubaye233/prl/tree/main/transforms"
+      "url": "https://github.com/TokenWave-AI/PRL/tree/main/transforms"
     }
   ],
   "code": "from prl.algo import labeler\n\nasync def focus(traj):\n    critical = await labeler.label(traj)\n    if critical is None:\n        traj.skip(\"judge returned no usable labels\")\n        return traj\n    for step in traj.steps:\n        if step.index not in critical:\n            step.mask()\n    return traj",
