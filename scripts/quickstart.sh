@@ -37,6 +37,10 @@ if grep -qE '(^|[^a-z_])ask\(|labeler\.' $(printf 'transforms/%s.py ' ${TRANSFOR
   echo "$TRANSFORM asks a judge: set PRL_JUDGE_API_BASE, PRL_JUDGE_MODEL and the key file PRL_JUDGE_KEY_FILE in" \
        "configs/sites/$PRL_SITE.env" >&2; exit 1
 fi
+# a transform that rerolls (step.reroll) trains with the branch post-process of the reroll arm (GRPO or PPO)
+if [ "$ALGO" != reinforce_plus_plus ] && grep -qE '\.reroll\(' $(printf 'transforms/%s.py ' ${TRANSFORM//+/ }); then
+  export ARM=${ARM:-ota_train_transform_reroll}
+fi
 follow() {  # RUN: the run's directory under runs/ (the arm's RUN_DIR)
   echo "[quickstart] the job's log: $(profile PRL_EXT)/logs/${CHAIN}_<job id>.log (a line per step); each update:" \
        "a line step N: {'train/loss': ...} in $(profile PRL_EXT)/runs/$1/train.log" >&2
@@ -57,7 +61,8 @@ if [ "$ready" -lt "$tasks" ]; then
   fi
   # a transform that rerolls: the try's arm with the same post-process
   [ "${ARM:-}" != ota_train_transform_reroll ] || export ARM=ota_train_smoke_reroll
-  export CHAIN=prepare+download+convert+smoke_grpo
+  # about 1 h with the image pull; 2 h, not the smoke's 8, so that it queues sooner
+  export CHAIN=prepare+download+convert+smoke_grpo ELAPSE=${ELAPSE:-02:00:00}
   follow 'grpo_ota_train_smoke_<job id>'; exec bash scripts/submit.sh
 fi
 if [ "$TRANSFORM" = atlas_signed ]; then

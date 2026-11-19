@@ -117,11 +117,13 @@ async def ask(messages: list[dict[str, str]], parse: Callable[[str], T], prefix:
     ``feedback``, a rejected answer and the reason go back to the model with the next attempt (asked the same question
     again, a model tends to repeat its mistake; in one test 2/3 rewrite plans were lost that way). The request's
     outcome goes into ``record``: latency_s, usage, answer, served_model, finish_reason of the last answer, errors,
+    rejected (each rejected answer with its attempt and the reason the model was told),
     rate_limited, unavailable (waits for the service), refused (prompt-policy refusals) and usage_total over all answers; model (the one asked last: the
     one that answered, or the last of the chain) and refused_by (the models that refused, in order)."""
     cfg = config(prefix)
     record = {} if record is None else record
     errors, rate_limited, unavailable, refused, refused_by = [], 0, 0, 0, []
+    rejected: list[dict[str, Any]] = []  # answers that came and were rejected, with the reason
     chain = [cfg["model"], *cfg["fallback_models"]]
     total = {"prompt_tokens": 0, "completion_tokens": 0}
     conversation = list(messages)
@@ -159,6 +161,8 @@ async def ask(messages: list[dict[str, str]], parse: Callable[[str], T], prefix:
                         attempt, conversation = 0, list(messages)
                         continue
                     break
+                if content is not None:
+                    rejected.append({"attempt": attempt, "answer": content, "reason": str(exc)})
                 if feedback and content is not None:  # an answer came and was rejected: say why
                     conversation = [*messages, {"role": "assistant", "content": content},
                                     {"role": "user", "content": f"That answer was rejected: {exc}\nAnswer again, in "
@@ -167,6 +171,7 @@ async def ask(messages: list[dict[str, str]], parse: Callable[[str], T], prefix:
                 attempt += 1
                 continue
             break
-    record.update(errors=errors, rate_limited=rate_limited, unavailable=unavailable, refused=refused, usage_total=total,
+    record.update(errors=errors, rejected=rejected, rate_limited=rate_limited, unavailable=unavailable, refused=refused,
+                  usage_total=total,
                   model=chain[min(len(refused_by), len(chain) - 1)], refused_by=refused_by)
     return result

@@ -31,8 +31,8 @@
 #                RUN_DIR; scripts/chain/replay_check.sh): resume, data parallelism, longest sample, NaN, kills
 # download and convert hold a lock per model, so jobs of one model that start together do it once.
 # When the chain ends (also after a failed step or the scheduler's SIGTERM), this job's own trial directories (the
-# training arm's HARBOR_TRIALS_DIR, the evaluation's) are packed into tars (scripts/lib/archive_trials.sh;
-# PRL_ARCHIVE_TRIALS=0 keeps them as directories).
+# training arm's HARBOR_TRIALS_DIR, the evaluation's; a smoke's stay as they are, for its acceptance) are packed into
+# tars (scripts/lib/archive_trials.sh; PRL_ARCHIVE_TRIALS=0 keeps them as directories).
 source scripts/lib/archive_trials.sh
 
 # in_arm ARM SCRIPT [ARG...]: run the bash SCRIPT ($2... are the ARGs) with ARM resolved as the chain steps resolve

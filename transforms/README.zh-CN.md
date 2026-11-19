@@ -20,12 +20,17 @@
 
 | | |
 |---|---|
-| `traj.task` | 题目（第一条 prompt） |
+| `traj.task` | 题目的 prompt：harness 的整段第一条 prompt（先是它的说明，再是题目） |
 | `traj.reward` | 测试分数（0–1，可写） |
 | `traj.steps` | 每轮模型输出一个 `Step`，按顺序；`step.index` 从 0 开始 |
 | `traj.trial_dir` | 这条轨迹的目录（Harbor 的记录、测试结果都在里面） |
 | `step.action` / `step.observation` | 这一轮模型的输出 / 之后环境返回的内容（带 chat 模板） |
 | `step.thinking` / `step.command` / `step.terminal` | 推理部分 / 动作 JSON（Terminus-2：analysis、plan、commands、task_complete；解析不了是 None）/ 终端输出（去掉模板；最后一步是 None） |
+
+Terminus-2 一步的 `command`：`{"analysis": "...", "plan": "...", "commands": [{"keystrokes": "ls -la\n", "duration": 0.1}], "task_complete": false}`；
+keystrokes 以 `\n` 结尾才执行，`C-c` 这类是按键，空的表示等待。`step.terminal` 是这一步之后的屏幕，提示符和敲的命令
+也在里面：从命令里取的字符串也会匹配到它的回显。
+
 
 ### 权重
 
@@ -34,6 +39,9 @@
 | `step.mask()` | 这一步不进 loss（PPO 下 critic 也不学这一步） |
 | `step.weight = w` | 这一步的 advantage × w。GRPO 里成功轨迹 A ≥ 0、失败轨迹 A ≤ 0，所以负的 w 会把方向反过来 |
 | `step.weight_text(text, w, every=False)` | 只有这段文字的 token 用 w，其余用 `step.weight`。`text` 必须在这一步的输出里出现恰好一次（`every=True`：每次出现）。不能和改写用在同一次调用里 |
+
+串联时，后一个函数拿到的是前一个留下的状态：`step.weight = w` 会替换前面的权重，`step.weight *= w` 是叠加；
+`step.masked` 表示这一步已被 mask。
 
 ### 改写
 
@@ -61,10 +69,12 @@
 - 原轨迹照常训练（它的 mask 和权重照常生效；前缀的改写只进重放，原轨迹保持原样）。
 - 限制：不能在被改写的步骤上或之后分支；被上下文总结切开的轨迹不行；一个串联里只能有一个 transform 要求分支。
 - 运行需要分支的后处理：arm 用 `ota_train_transform_reroll`（它加了
-  `--custom-reward-post-process-path prl.algo.added_rewards.group_rewards`）。
+  `--custom-reward-post-process-path prl.algo.added_rewards.group_rewards`）；快速开始遇到调用 `reroll` 的 transform 会自动选它，
+  训练前的检查也会拦下没用它的作业。
 - 结果：轨迹目录下每个分支一个 `reroll/s<步>_b<序号>/`（请求、结果、`reroll_replay.json`：重放的每一轮终端输出和原来是否一致，
   不一致的把两边的内容也记下来）；指标 `rollout/reroll/*`（`requested_trials`、`branches`、`{ok,failed,subgroup}_branches`、
-  `reward_mean`、`source_reward_mean`、`seconds_mean`）。
+  `reward_mean`、`source_reward_mean`、`seconds_mean`）。分支自己的 trial 目录和其它 trial 并列在 `harbor_trials/` 下
+  （没有 `transform.json`；分支的 `outcome.json` 里写着它）。
 - 重放的终端输出是真实的，和原轨迹会有少量差别（时间、inode、git hash 这类）；框架记录、不拦截。
 
 ### 调模型
@@ -77,7 +87,9 @@ k = await ask(prompt, check=fn)     # prompt 是字符串或 messages 列表
   判官之外再要一个教师：配一组前缀不同的同名变量（例如 `PRL_TEACHER_*`），调用时写 `ask(..., prefix="PRL_TEACHER_")`。
 - `check(answer)` 返回要用的值；抛错表示不合格，框架会把原因告诉模型再问一次。问不出来就抛 `Unanswered`，这条轨迹照原样训练。
 - 重试、429 等待、并发、被内容过滤拒绝时依次换 `PRL_JUDGE_FALLBACK_MODELS` 里的模型，都由框架处理。
-- 每次调用（请求、回答、用时、token 数、实际作答的模型）存到 `<trial_dir>/transform_calls.json`。
+- 一次请求最多试几次（出错、超时、回答被拒各用掉一次）、时限和 `max_tokens`：`PRL_JUDGE_ATTEMPTS`（3）、
+  `PRL_JUDGE_TIMEOUT`（600 秒）、`PRL_JUDGE_MAX_TOKENS`（16384）。
+- 每次调用（请求、回答、每个被拒的回答和原因、用时、token 数、实际作答的模型）存到 `<trial_dir>/transform_calls.json`。
 
 ### 其他
 
@@ -155,14 +167,17 @@ TRANSFORM=branch PRL_TRANSFORM_ARGS='{"select": "first_bad", "allocate": {"name"
 | 开跑前检查 | 训练作业开头在 8 条录好的轨迹上跑你的函数（包括模型调用）；报错、返回非法结果、卡住、全部跳过，作业在训练前停下 |
 | 失败兜底 | 某条轨迹上失败 → 照原样训练并记录原因；连续 32 条失败 → 训练停下，避免悄悄退化成原生 GRPO |
 | 一致性检查 | 每个样本过 Miles 的校验（token、loss mask、logprob、长度）；分数只在你写了 `traj.reward` 时变；没有可训练 token 的样本丢掉 |
-| 记录 | 每条轨迹 `transform.json`：每个函数的状态、用时、改了哪些步（`weighted_steps` {步骤: 新权重}、`masked_steps`、`token_weighted_steps`、`rewritten_steps`、`deleted_steps`、`reroll_steps`）、分数前后、可训练 token 前后；训练日志里有对应的 `rollout/*` 指标 |
+| 记录 | 每条轨迹 `transform.json`：每个函数的状态、用时、参数（含默认值）、改了哪些步（`weighted_steps` {步骤: 新权重}、`masked_steps`、`token_weighted_steps`、`rewritten_steps`、`deleted_steps`、`reroll_steps`）、分数前后、可训练 token 前后；训练日志里有对应的 `rollout/*` 指标 |
 | 框架烟测 | 框架代码变了以后要跑一次（两次更新，约半小时），生成收据；训练作业自动找匹配当前代码的收据 |
 
 ## 5. 配置
 
+作业里的设置写在站点配置（`configs/sites/<site>.env`）或 arm 里：作业看不到提交它的 shell 里的环境变量，
+`TRANSFORM` 和 `PRL_TRANSFORM_ARGS` 除外。
+
 | 环境变量 | 默认 | |
 |---|---|---|
-| `PRL_TRANSFORM` | 无 | 名字，或逗号串联 |
+| `PRL_TRANSFORM` | 无 | 名字，或用 `+`（或逗号）串联 |
 | `PRL_TRANSFORM_ARGS` | 无 | JSON；串联时按名字分开 |
 | `PRL_TRANSFORM_TIMEOUT` | 1800 | 一条轨迹上的秒数上限 |
 | `PRL_TRANSFORM_MAX_FAILURES` | 32 | 连续失败多少条停训练（0 不停） |

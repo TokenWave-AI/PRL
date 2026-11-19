@@ -85,13 +85,13 @@ def test_quickstart_follows_the_sandboxes_built(tmp_path: Path) -> None:
     assert "trying atlas_signed on the smoke's 8" in tried.stderr
     assert f"{tmp_path}/ext/runs/grpo_ota_train_smoke_<job id>/train.log" in tried.stderr
     for part in ("PRL_CHAIN=prepare+download+convert+smoke_grpo,", "ARM=ota_train_smoke_atlas_signed,",
-                 "TRANSFORM=atlas_signed", "PRL_TRANSFORM_ARGS_FILE=", "walltime=08:00:00"):
+                 "TRANSFORM=atlas_signed", "PRL_TRANSFORM_ARGS_FILE=", "walltime=02:00:00"):
         assert part in tried.stdout, part
     assert "train_eval" not in tried.stdout
-    reroll = _run(["bash", "scripts/quickstart.sh"], tmp_path, PRL_SITE="_test_qs_pbs", DRY_RUN="1",
-                  TRANSFORM="atlas", ARM="ota_train_transform_reroll")
-    assert reroll.returncode == 0, reroll.stderr
-    assert "ARM=ota_train_smoke_reroll," in reroll.stdout and "TRANSFORM=atlas" in reroll.stdout
+    for env in ({"TRANSFORM": "atlas", "ARM": "ota_train_transform_reroll"}, {"TRANSFORM": "reroll_smoke"}):
+        reroll = _run(["bash", "scripts/quickstart.sh"], tmp_path, PRL_SITE="_test_qs_pbs", DRY_RUN="1", **env)
+        assert reroll.returncode == 0, reroll.stderr  # a transform that rerolls: the reroll smoke's post-process
+        assert "ARM=ota_train_smoke_reroll," in reroll.stdout and f",TRANSFORM={env['TRANSFORM']} " in reroll.stdout
     rpp = _run(["bash", "scripts/quickstart.sh"], tmp_path, PRL_SITE="_test_qs_pbs", DRY_RUN="1",
                ALGO="reinforce_plus_plus")
     assert rpp.returncode != 0 and "8 have a template" in rpp.stderr
@@ -119,6 +119,9 @@ def test_quickstart_runs_your_transform_on_the_transform_arm(built: Path) -> Non
                TRANSFORM="atlas", PRL_RUN_ID="mine")
     assert out.returncode == 0, out.stderr
     assert "ARM=ota_train_transform," in out.stdout and "TRANSFORM=atlas," in out.stdout
+    reroll = _run(["bash", "scripts/quickstart.sh"], tmp_path, PRL_SITE="_test_qs_pbs", DRY_RUN="1",
+                  TRANSFORM="reroll_smoke", PRL_RUN_ID="mine")
+    assert reroll.returncode == 0 and "ARM=ota_train_transform_reroll," in reroll.stdout, reroll.stderr
     missing = _run(["bash", "scripts/quickstart.sh"], tmp_path, PRL_SITE="_test_qs_pbs", DRY_RUN="1",
                    TRANSFORM="atlas+no_such_transform")
     assert missing.returncode != 0 and "no transforms/no_such_transform.py" in missing.stderr

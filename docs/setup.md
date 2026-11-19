@@ -30,16 +30,21 @@ dependencies, the tasks (728 training + 70 TB-dev), the weights and their Megatr
 ## Good to know
 
 - **A quicker first try**: `PRL_SANDBOX_SMOKE_ONLY=1` in step 2 builds only the smoke's 8 tasks; the same quick
-  start command then tries the transform on them (2 updates, about 30 min) instead of training. Step 2 run again
-  without it builds the rest.
+  start command then tries the transform on them (2 updates, about 30 min; the job asks for 2 h) instead of training.
+  Step 2 run again without it builds the rest. The smoke splits half of its trials with the context summary on
+  purpose; a transform that rewrites or rerolls skips those (a split trajectory cannot be rewritten).
 - **Logs**: in `$PRL_EXT/logs/`; each run's `train.log` (`$PRL_EXT/runs/<run>/`) has a line per update,
   `step N: {'train/loss': ...}`; the quick start prints both places. Harmless at the start: SGLang's `post-warmup
   freeze_gc failed` with a `Connection refused` traceback, FlashInfer's `workspace preflight probe failed (...
   CUDA_ERROR_NOT_SUPPORTED: 801)` on GB200, and Apptainer's `signature not found` for the pulled (unsigned) image. Later
   a trial's `failed to send non-blocking keys ... no server running` (Harbor's tmux) is tried again by itself
-  (`rollout/abort_retried_trials`).
-- `DRY_RUN=1` prints the scheduler command and submits nothing; `ELAPSE=hh:mm:ss` sets a job's time limit. A job
-  stopped by its time limit goes on when the same command is run again.
+  (`rollout/abort_retried_trials`), as is one that Harbor aborts with `Command ended without an end event` (a
+  traceback, then Miles' unrelated `All samples truncated`; then `trial aborted, retrying it alone`), and one with `mismatch_refill rejected` (its tokens did not match the
+  inference server's; `exhausted`: its group is replaced).
+- `DRY_RUN=1` prints the scheduler command and submits nothing; `ELAPSE=hh:mm:ss` sets a job's time limit and
+  `QUEUE=<queue>` its queue (PBS) or resource group (PJM), e.g. a short debug queue for the quicker first try, with
+  the first job's steps run ahead (below). A job stopped by its time limit goes on when the same command is run
+  again.
 - `PRL_SITE=<site> CHAIN=task_check bash scripts/submit.sh` checks the smoke's 8 sandboxes alone (the official
   solution must score 1, a no-op agent 0); the first smoke does it by itself.
 - The first job's steps, to run ahead (e.g. under a short time limit): `CHAIN=prepare` (image, Harbor, tasks),
@@ -52,9 +57,17 @@ dependencies, the tasks (728 training + 70 TB-dev), the weights and their Megatr
   there (`bash scripts/setup/check_third_party.sh` checks that `third_party/` is byte-identical to upstream).
 - The containers see only `PRL_ROOT`, `PRL_EXT`, `HF_HOME`, `PRL_SCRATCH` and `PRL_EXTRA_BINDS`: keep every file a job
   reads, the key files too, under them (e.g. `$PRL_EXT/private/`).
-- Step 2 on another machine than the cluster: a clone of the repository there with the same `configs/sites/<site>.env`
-  (git ignores it: copy it), `PRL_EXT` set to a directory there, then its `task_snapshots/` copied to the cluster's
-  `PRL_EXT` ([`sandboxes.md`](sandboxes.md)).
+- Step 2 on another machine than the cluster (no Docker there, or not linux/amd64): a clone of the repository there
+  with the same `configs/sites/<site>.env` (git ignores it: copy it), the paths of this machine, then the snapshots
+  copied to the cluster ([`sandboxes.md`](sandboxes.md)):
+
+  ```bash
+  PRL_SITE=<site> PRL_EXT=<dir> E2B_API_KEY_FILE=<sandbox key> PRL_REGISTRY_CREDENTIALS_FILE=<registry credentials> \
+    bash scripts/setup/build_sandboxes.sh   # PRL_DOCKER_COMMAND="sudo docker --config <dir>": a Docker logged in elsewhere
+  rsync -a <dir>/task_snapshots <cluster>:<the cluster's PRL_EXT>/
+  ```
+
+  The registry credentials are needed only there; the cluster needs the sandbox key and the judge key.
 - SingularityCE, or login nodes unlike the compute nodes (another CPU, Python < 3.10): the commented settings under
   "Only for some sites" in `configs/sites/example.env`.
 - No scheduler inside another scheduler's allocation: add `FOREGROUND=1`; that scheduler sets the time limit (`ELAPSE`

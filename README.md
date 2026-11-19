@@ -162,18 +162,18 @@ PRL_SITE=<site> TRANSFORM=atlas bash scripts/quickstart.sh          # any transf
 
 One job on one node of 4 GPUs (≥ 90 GB each, ≥ 768 GB of RAM) trains Qwen3.5-9B on OpenThoughts-Agent-v1-RL (68 updates) and evaluates it on TB-dev: about 15 h. The first job also pulls the container image, downloads the tasks and the weights, and runs a short framework smoke.
 
-- Parameters: `PRL_TRANSFORM_ARGS='{"other_weight": 0.3}'`; algorithm: `ALGO=reinforce_plus_plus` (`ALGO=ppo` after its own smoke, [`CONTRIBUTING.md`](CONTRIBUTING.md)); chains: `TRANSFORM=rewrite+atlas` (run in order; `+`, not a comma, because the submit commands split variables on commas).
+- Parameters: `PRL_TRANSFORM_ARGS='{"other_weight": 0.3}'`; algorithm: `ALGO=reinforce_plus_plus` (`ALGO=ppo` after its own smoke, [`CONTRIBUTING.md`](CONTRIBUTING.md)); chains: `TRANSFORM=rewrite+atlas` (run in order; `+`, not a comma, because the submit commands split variables on commas), with params per name: `PRL_TRANSFORM_ARGS='{"atlas": {"other_weight": 0.3}}'`.
 - The judge is the one of your site profile; the 58.09% run used gpt-6.1-sol, at the reasoning effort low that the signed ATLAS arm sets (`PRL_JUDGE_EXTRA_BODY`).
-- The command prints where the logs are. Each update logs a line `step N: {'train/loss': ...}` in the run's `train.log` (`$PRL_EXT/runs/<run>/`); what the transform did, a line per trajectory: `[prl] transform <name> on <trajectory>: ok; <kept>/<all> trained tokens kept` (`[prl] step weights: ...` counts step weights only, not masks); the TB-dev score is `eval/heldout` in the evaluation's. A full run stopped by its time limit goes on when the same command is run again.
+- The command prints where the logs are. Each update logs a line `step N: {'train/loss': ...}` in the run's `train.log` (`$PRL_EXT/runs/<run>/`); what the transform did, a line per trajectory: `[prl] transform <name> on <trajectory>: ok; steps changed: <e.g. 5 weighted, 2 masked>; <kept>/<all> trained tokens kept` (`[prl] step weights: ...`, one line per training rank, counts samples, a trajectory split by the context summary being several, and step weights only, not masks; its last count, `with subgroup advantage spans`, the samples scored against their reroll siblings); the TB-dev score is `eval/heldout` in the evaluation's. A full run stopped by its time limit goes on when the same command is run again.
 
 **Set up once: two steps** (details: [`docs/setup.md`](docs/setup.md)).
 
 | # | Step | Command |
 |---|---|---|
-| 1 | Site profile: the scheduler (PBS, PJM or none), a work directory, an E2B-compatible sandbox service and the registry it pulls from, the judge (any OpenAI-compatible endpoint) | `cp configs/sites/example.env configs/sites/<site>.env`, then fill in its first block (SingularityCE instead of Apptainer, or Python < 3.10 on the hosts: also its "Only for some sites") |
-| 2 | Sandboxes: an image and a template per task, on a machine with Docker | `PRL_SITE=<site> bash scripts/setup/build_sandboxes.sh` |
+| 1 | Site profile: the scheduler (PBS, PJM or none), a work directory, an E2B-compatible sandbox service and the registry it pulls from, the judge (any OpenAI-compatible endpoint) | `cp configs/sites/example.env configs/sites/<site>.env`, then fill in its first block and put the key files where it names them (`$PRL_EXT/private/`, chmod 600; SingularityCE instead of Apptainer, or Python < 3.10 on the hosts: also its "Only for some sites") |
+| 2 | Sandboxes: an image and a template per task, on a machine with Docker (another than the cluster: [`docs/setup.md`](docs/setup.md#site-specifics)) | `PRL_SITE=<site> bash scripts/setup/build_sandboxes.sh` |
 
-A quicker first try: with `PRL_SANDBOX_SMOKE_ONLY=1`, step 2 builds only 8 tasks, and the same command then tries the transform on them (2 updates, about 30 min) instead of training.
+**A quicker first try**: with `PRL_SANDBOX_SMOKE_ONLY=1`, step 2 builds only 8 tasks (minutes), and the same command then tries the transform on them (2 updates, about 30 min; the job asks for 2 h) instead of training.
 
 **Your own transform: write, try, train.**
 
@@ -186,11 +186,11 @@ def my_transform(traj, **params):
     return traj             # change nothing = plain GRPO
 ```
 
-- **Input** `traj`: one finished, graded trajectory. `traj.task` is the task, `traj.reward` the test reward (0 / 1), `traj.steps`
+- **Input** `traj`: one finished, graded trajectory. `traj.task` is the task's prompt (the harness's whole first prompt, the task inside it), `traj.reward` the test reward (0 / 1), `traj.steps`
   its turns (one turn = one model call), each with `step.thinking`, `step.command` and `step.terminal` (the terminal output after it ran).
 - **Output**: the same `traj`; the marks you put on its steps are the output.
 - **Parameters**: the function's keyword arguments are its run-time settings (`PRL_TRANSFORM_ARGS='{"other_weight": 0.3}'`).
-- To ask a model, write `async def` and `await ask(...)`; otherwise a plain function. It is called once per trajectory.
+- To ask a model, write `async def` and `await ask(...)` (`from prl.transforms import ask`); otherwise a plain function. It is called once per trajectory.
 
 **② Try it on recorded trajectories, no GPU.** The repo ships 8 real training trajectories; your function runs on them (model calls included) and each decision is written to the output directory. With Python ≥ 3.10, from the repository root:
 
@@ -204,9 +204,11 @@ PRL_TRANSFORM_CHECK_OUT=/tmp/check python -m prl.transforms.check
 A function that asks a model uses the judge of the site profile: `set -a; source configs/sites/<site>.env; set +a` first (on another machine than the cluster, `export PRL_JUDGE_KEY_FILE=<the key file here>` before it). What the quick start trains by default: `PRL_TRANSFORM=atlas_signed PRL_TRANSFORM_ARGS='{"failed_good_weight": 0.0}'`.
 
 - The terminal shows one line per trajectory: `[transform check] <trajectory>: reward <reward>, <steps> steps, <status>, steps changed: <e.g. 5 weighted, 2 masked>, trained tokens <before> -> <after>, <seconds> s`,
-  where the status is `ok` or `skipped` (between them the framework's own lines, `[prl] transform ... trained tokens kept`, and with a judge its HTTP requests). A last line `passed` means it passed; otherwise it prints `FAILED`, the trajectory and the reason.
+  where the status is `ok` or `skipped` (a skipped line ends with the reason; between them the framework's own lines, `[prl] transform ... trained tokens kept`, and with a judge its HTTP requests). A last line `passed` means it passed; otherwise it prints `FAILED`, the trajectory and the reason.
 - The output directory has one subdirectory per trajectory: `transform.json` is the framework's record (each function's status and time, what you wrote into `traj.record`,
   the steps it changed, e.g. `weighted_steps` {step: new weight}, the trainable tokens before / after) and `transform_calls.json` every `ask` request and answer (the ATLAS judge's: `atlas_labels.json`); `summary.json` sums up all 8.
+- The step lists count from 0, as `step.index`; ATLAS' own labels (`critical`, `good` / `bad`, `atlas_labels.json`) from 1, as in the judge's prompt.
+- A reroll is only recorded here (`reroll` in `transform.json`: the steps and the turns to replay); its branches run in training, where the quick start picks the arm a reroll needs by itself.
 
 **③ Train and evaluate it**: `PRL_SITE=<site> TRANSFORM=my_transform bash scripts/quickstart.sh`. The job first runs your function on the recorded trajectories and does not start training if it raises, times out or skips them all.
 

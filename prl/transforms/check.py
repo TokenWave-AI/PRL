@@ -79,19 +79,7 @@ def samples(trial: dict[str, Any], tokenizer: Any, trial_dir: str) -> list[Any]:
     return out
 
 
-# transform.json's step lists (prl/transforms/core.py), as the check line names them
-CHANGES = (("weighted_steps", "weighted"), ("masked_steps", "masked"), ("token_weighted_steps", "token-weighted"),
-           ("rewritten_steps", "rewritten"), ("deleted_steps", "deleted"), ("reroll_steps", "rerolled"))
-
-
-def changed_steps(record: dict[str, Any]) -> dict[str, list[int]]:
-    """The steps the chain changed, by kind (a step in several functions of the chain counts once per kind)."""
-    out: dict[str, set[int]] = {}
-    for entry in record["chain"]:
-        for key, kind in CHANGES:
-            out.setdefault(kind, set()).update(int(i) for i in entry.get(key) or [])
-    out["rewritten"] -= out["deleted"]  # a deleted step is in rewritten_steps too
-    return {kind: sorted(steps) for kind, steps in out.items() if steps}
+CHANGES, changed_steps = core.CHANGES, core.changed_steps  # the check line's step counts
 
 
 async def check(tokenizer: Any, fixture: Path, out: Path, timeout: float, args: Any = None) -> dict[str, Any]:
@@ -115,13 +103,15 @@ async def check(tokenizer: Any, fixture: Path, out: Path, timeout: float, args: 
         record = kept[0].metadata["prl_transform"]
         return {"trial": trial["name"], "reward": trial["reward"], "steps": steps,
                 "status": [e["status"] for e in record["chain"]], "seconds": round(time.time() - t0, 1),
+                "skipped": [e.get("reason", "") for e in record["chain"] if e["status"] == "skipped"],
                 "trained_tokens": [record["trained_tokens_before"], record["trained_tokens_after"]],
                 "changed_steps": changed_steps(record)}
 
     results = await asyncio.gather(*(one(trial) for trial in trials))
     if all("skipped" in r["status"] for r in results):
         raise CheckFailed(f"transform {spec} skipped all {len(results)} recorded trials (see {out}/*/transform.json)")
-    summary = {"transform": spec, "params": [params for _, _, params in chain], "fixture": str(fixture),
+    summary = {"transform": spec, "params": [core.effective_params(fn, params) for _, fn, params in chain],
+               "fixture": str(fixture),
                "trials": results}
     (out / "summary.json").write_text(json.dumps(summary, indent=2) + "\n")
     return summary
@@ -151,10 +141,18 @@ def main() -> int:
         print(f"[transform check] FAILED: {exc}\n  records: {out}", file=sys.stderr, flush=True)
         return 1
     for r in summary["trials"]:
-        changes = ", ".join(f"{len(steps)} {kind}" for kind, steps in r["changed_steps"].items()) or "none"
+        changes = core.describe_changes(r["changed_steps"])
         print(f"[transform check] {r['trial']}: reward {r['reward']}, {r['steps']} steps, {'/'.join(r['status'])}, "
               f"steps changed: {changes}, trained tokens {r['trained_tokens'][0]} -> {r['trained_tokens'][1]}, "
-              f"{r['seconds']} s", flush=True)
+              f"{r['seconds']} s" + "".join(f"; skipped: {why}" for why in r["skipped"]), flush=True)
+    rerolled = sum("rerolled" in r["changed_steps"] for r in summary["trials"])
+    # in a job (EXTRA_ARGS set): a reroll trains with its own reward, which needs the branch post-process; without
+    # it every branch request would fail in training, past this check (prl/rollout/branching.py)
+    if rerolled and "EXTRA_ARGS" in os.environ and "--custom-reward-post-process-path" not in extra:
+        print(f"[transform check] FAILED: {summary['transform']} rerolls ({rerolled} recorded trials); a reroll needs "
+              "the branch post-process: ARM=ota_train_transform_reroll (a try on the smoke's 8: "
+              "ota_train_smoke_reroll)", file=sys.stderr, flush=True)
+        return 1
     print(f"[transform check] passed: {summary['transform']} on {len(summary['trials'])} recorded trials; {out}",
           flush=True)
     return 0

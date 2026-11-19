@@ -23,12 +23,17 @@ are implemented and have passed the unit tests and a GPU smoke.
 
 | | |
 |---|---|
-| `traj.task` | the task (the first prompt) |
+| `traj.task` | the task's prompt: the harness's whole first prompt (its instructions, then the task) |
 | `traj.reward` | the test reward (0–1, writable) |
 | `traj.steps` | one `Step` per model turn, in order; `step.index` starts at 0 |
 | `traj.trial_dir` | the trajectory's directory (Harbor's records and the test results are in it) |
 | `step.action` / `step.observation` | the model's output in this turn / what the environment returned after it (with the chat template) |
 | `step.thinking` / `step.command` / `step.terminal` | the reasoning / the action JSON (Terminus-2: analysis, plan, commands, task_complete; None if it does not parse) / the terminal output (without the template; None on the last step) |
+
+A Terminus-2 step's `command`: `{"analysis": "...", "plan": "...", "commands": [{"keystrokes": "ls -la\n", "duration": 0.1}], "task_complete": false}`;
+keystrokes end with `\n` to run, `C-c` and the like are keys, an empty one waits. `step.terminal` is the screen after
+the step: the prompt and the typed command too, so a pattern taken from the command also matches its echo.
+
 
 ### Weights
 
@@ -37,6 +42,9 @@ are implemented and have passed the unit tests and a GPU smoke.
 | `step.mask()` | this step leaves the loss (under PPO the critic does not learn it either) |
 | `step.weight = w` | this step's advantage × w. In GRPO a successful trajectory has A ≥ 0 and a failed one A ≤ 0, so a negative w reverses the direction |
 | `step.weight_text(text, w, every=False)` | only the tokens of this text get w, the rest of the step keeps `step.weight`. `text` must occur exactly once in the step's output (`every=True`: every occurrence). Not in the same call as a rewrite |
+
+In a chain, a function gets the steps as the one before left them: `step.weight = w` replaces an earlier weight,
+`step.weight *= w` combines with it; `step.masked` tells a masked step.
 
 ### Rewrite
 
@@ -69,11 +77,13 @@ the policy generates from this step on and the tests grade it. All branches run 
 - Limits: no branch at or after a rewritten step; not for trajectories split by the context summary; only one
   transform of a chain may ask for branches.
 - A run with branches needs the branch post-processing: the arm `ota_train_transform_reroll` (it adds
-  `--custom-reward-post-process-path prl.algo.added_rewards.group_rewards`).
+  `--custom-reward-post-process-path prl.algo.added_rewards.group_rewards`); the quick start picks it for a
+  transform that calls `reroll`, and the check before a run stops a job without it.
 - Results: one `reroll/s<step>_b<j>/` per branch in the trajectory's directory (the request, the outcome, and
   `reroll_replay.json`: for each replayed turn, whether its terminal output matched the original, with both sides
   when it did not); metrics `rollout/reroll/*` (`requested_trials`, `branches`, `{ok,failed,subgroup}_branches`,
-  `reward_mean`, `source_reward_mean`, `seconds_mean`).
+  `reward_mean`, `source_reward_mean`, `seconds_mean`). A branch's own trial directory sits next to the others in
+  `harbor_trials/` (no `transform.json`; the branch's `outcome.json` names it).
 - The replayed terminal output is real and differs a little from the original (times, inodes, git hashes and the
   like); the framework records this and does not block it.
 
@@ -90,7 +100,9 @@ k = await ask(prompt, check=fn)     # prompt is a string or a list of messages
   why and asks again. If no answer passes, `ask` raises `Unanswered` and the trajectory trains as it was.
 - Retries, waiting out 429s, concurrency, and switching in turn to the models of `PRL_JUDGE_FALLBACK_MODELS` when a
   content filter refuses are all handled by the framework.
-- Every call (request, answer, time, token counts, the model that answered) is saved to
+- How often a request is tried (an error, a timeout or a rejected answer each uses an attempt), its time limit and
+  `max_tokens`: `PRL_JUDGE_ATTEMPTS` (3), `PRL_JUDGE_TIMEOUT` (600 s), `PRL_JUDGE_MAX_TOKENS` (16384).
+- Every call (request, answer, each rejected answer with the reason, time, token counts, the model that answered) is saved to
   `<trial_dir>/transform_calls.json`.
 
 ### Other
@@ -176,14 +188,17 @@ from the critic).
 | Check before the run | every training job first runs your function on 8 recorded trajectories (model calls included); if it raises, returns an invalid result, hangs or skips them all, the job stops before training |
 | Failures | a failure on one trajectory: it trains as it was and the reason is recorded; 32 failures in a row: training stops, so that it does not silently turn into plain GRPO |
 | Consistency checks | every sample passes Miles' checks (tokens, loss mask, logprobs, length); the reward changes only if you wrote `traj.reward`; a sample with no trainable token is dropped |
-| Records | `transform.json` per trajectory: each function's status and time, the steps it changed (`weighted_steps` {step: new weight}, `masked_steps`, `token_weighted_steps`, `rewritten_steps`, `deleted_steps`, `reroll_steps`), the reward before / after, the trainable tokens before / after; matching `rollout/*` metrics in the training log |
+| Records | `transform.json` per trajectory: each function's status, time and params (defaults included), the steps it changed (`weighted_steps` {step: new weight}, `masked_steps`, `token_weighted_steps`, `rewritten_steps`, `deleted_steps`, `reroll_steps`), the reward before / after, the trainable tokens before / after; matching `rollout/*` metrics in the training log |
 | Framework smoke | needed once after the framework code changes (two updates, about half an hour); it writes a receipt, and training jobs find the receipt that matches the current code |
 
 ## 5. Settings
 
+In a job, set them in the site profile (`configs/sites/<site>.env`) or an arm: the job does not see the
+environment of the shell that submits it, apart from `TRANSFORM` and `PRL_TRANSFORM_ARGS`.
+
 | Environment variable | Default | |
 |---|---|---|
-| `PRL_TRANSFORM` | none | a name, or a chain joined by commas |
+| `PRL_TRANSFORM` | none | a name, or a chain joined by `+` (or commas) |
 | `PRL_TRANSFORM_ARGS` | none | JSON; per name in a chain |
 | `PRL_TRANSFORM_TIMEOUT` | 1800 | seconds allowed on one trajectory |
 | `PRL_TRANSFORM_MAX_FAILURES` | 32 | failures in a row that stop training (0: never) |

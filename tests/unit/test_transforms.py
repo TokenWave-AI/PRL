@@ -789,3 +789,16 @@ def test_miles_weight_version_objects_are_frozen(use):
     prompt = len(s.tokens) - s.response_length
     runs = [(prompt + a, prompt + b) for t, a, b in core._runs(s.loss_mask) if t]
     assert [(c.spans[0].abs_start, c.spans[0].abs_end) for c in s.weight_versions] == runs
+
+
+def test_the_log_line_names_the_steps_changed_and_the_params_have_defaults(use, caplog, tmp_path):
+    def push_down(traj, factor: float = -1.0):
+        traj.steps[0].weight = factor
+        traj.steps[1].mask()
+
+    use(push_down)
+    with caplog.at_level("INFO", logger=core.logger.name):
+        _run(_trial(str(tmp_path)))
+    assert "ok; steps changed: 1 weighted, 1 masked; 2/4 trained tokens kept" in caplog.text
+    record = json.loads((tmp_path / "transform.json").read_text())
+    assert record["chain"][0]["params"] == {"factor": -1.0}

@@ -102,3 +102,34 @@ def test_the_line_names_weight_changes(fixture, tmp_path, monkeypatch, capsys):
     monkeypatch.setenv("PRL_TRANSFORM_FIXTURE", str(path))
     assert check.main() == 0
     assert "ok_trial: reward 1.0, 2 steps, ok, steps changed: 1 weighted, trained tokens 3 -> 3" in capsys.readouterr().out
+
+
+def test_a_skip_names_its_reason_and_a_reroll_needs_its_arm_in_a_job(fixture, tmp_path, monkeypatch, capsys):
+    path, select = fixture
+
+    def skip_failures(traj, why: str = "a failure"):
+        if not traj.reward:
+            traj.skip(why)
+
+    select(skip_failures)
+    monkeypatch.setattr(check, "Tokenizer", lambda _: CharTokenizer())
+    monkeypatch.delenv("EXTRA_ARGS", raising=False)
+    monkeypatch.setenv("MODEL_HF_DIR", "unused")
+    monkeypatch.setenv("PRL_TRANSFORM_CHECK_OUT", str(tmp_path / "out"))
+    monkeypatch.setenv("PRL_TRANSFORM_FIXTURE", str(path))
+    assert check.main() == 0
+    line = next(x for x in capsys.readouterr().out.splitlines() if "fail_trial:" in x)
+    assert ", skipped, steps changed: none," in line and line.endswith(" s; skipped: a failure")
+    assert json.loads((tmp_path / "out" / "summary.json").read_text())["params"] == [{"why": "a failure"}]
+
+    async def rerolls(*_args, **_kwargs):
+        return {"transform": "t", "trials": [{"trial": "x", "reward": 0.0, "steps": 2, "status": ["ok"], "seconds": 0,
+                                              "trained_tokens": [1, 1], "changed_steps": {"rerolled": [1]},
+                                              "skipped": []}]}
+
+    monkeypatch.setattr(check, "check", rerolls)
+    assert check.main() == 0  # no EXTRA_ARGS: the try on recorded trials, outside a job
+    monkeypatch.setenv("EXTRA_ARGS", "--use-tis")
+    assert check.main() == 1 and "ARM=ota_train_transform_reroll" in capsys.readouterr().err
+    monkeypatch.setenv("EXTRA_ARGS", "--custom-reward-post-process-path prl.algo.added_rewards.group_rewards")
+    assert check.main() == 0

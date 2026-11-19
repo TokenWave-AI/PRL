@@ -17,7 +17,8 @@ PRL_SITE=<site> bash scripts/setup/build_sandboxes.sh
 Besides the sandbox endpoint, it reads from the site profile the registry the images go to (`PRL_REGISTRY`) and the
 credentials the service pulls them with (`PRL_REGISTRY_CREDENTIALS_FILE`, `{"username": ..., "password": ...}`,
 chmod 600). The script calls `sudo docker`, so log root's Docker in to that registry (`sudo docker login
---password-stdin`), or set `PRL_DOCKER_COMMAND="sudo docker --config <dir>"` for a Docker config logged in elsewhere.
+--password-stdin`), or set `PRL_DOCKER_COMMAND="sudo docker --config <dir>"` for a Docker config logged in elsewhere (a directory of
+your own: buildx keeps its current builder there too).
 On another machine than the cluster, set `PRL_EXT` to a directory there, with the key files where the profile names them
 (or set `E2B_API_KEY_FILE` and `PRL_REGISTRY_CREDENTIALS_FILE` too), and copy `$PRL_EXT/task_snapshots` to the cluster's
 `PRL_EXT` afterwards. `PRL_SANDBOX_SMOKE_ONLY=1` builds only the 8 tasks of the framework smoke (a few minutes; all 798

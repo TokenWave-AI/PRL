@@ -93,6 +93,13 @@ def _resolve(name: str) -> Callable[..., Any]:
     return fn
 
 
+def effective_params(fn: Callable[..., Any], params: dict[str, Any]) -> dict[str, Any]:
+    """The params ``fn`` runs with: its keyword defaults, then ``params`` (recorded in transform.json)."""
+    defaults = {name: p.default for name, p in list(inspect.signature(fn).parameters.items())[1:]
+                if p.default is not inspect.Parameter.empty}
+    return {**defaults, **params}
+
+
 def configured() -> list[tuple[str, Callable[..., Any], dict[str, Any]]]:
     """The selected chain as (item, function, params); [] without a transform. Raises on any configuration error."""
     spec, raw, source = _spec()
@@ -120,6 +127,26 @@ def configured() -> list[tuple[str, Callable[..., Any], dict[str, Any]]]:
             raise ValueError(f"params {p} do not fit {item!r}{inspect.signature(fn)}: {exc}") from None
         chain.append((item, fn, p))
     return chain
+
+
+# transform.json's step lists, as the log line of a trajectory and the check's line name them
+CHANGES = (("weighted_steps", "weighted"), ("masked_steps", "masked"), ("token_weighted_steps", "token-weighted"),
+           ("rewritten_steps", "rewritten"), ("deleted_steps", "deleted"), ("reroll_steps", "rerolled"))
+
+
+def changed_steps(record: dict[str, Any]) -> dict[str, list[int]]:
+    """The steps the chain changed, by kind (a step in several functions of the chain counts once per kind)."""
+    out: dict[str, set[int]] = {}
+    for entry in record["chain"]:
+        for key, kind in CHANGES:
+            out.setdefault(kind, set()).update(int(i) for i in entry.get(key) or [])
+    out["rewritten"] -= out["deleted"]  # a deleted step is in rewritten_steps too
+    return {kind: sorted(steps) for kind, steps in out.items() if steps}
+
+
+def describe_changes(changed: dict[str, list[int]]) -> str:
+    """The counts of changed_steps, e.g. "5 weighted, 2 masked", or "none"."""
+    return ", ".join(f"{len(steps)} {kind}" for kind, steps in changed.items()) or "none"
 
 
 def _trained(samples: list[Any]) -> int:
@@ -212,7 +239,7 @@ async def run(samples: list[Any], tokenizer: Any, args: Any = None, strict: bool
     timeout = float(os.getenv("PRL_TRANSFORM_TIMEOUT", "1800")) or None
     for item, fn, params in chain:
         original = copy.deepcopy(samples)
-        entry: dict[str, Any] = {"transform": item, "params": params}
+        entry: dict[str, Any] = {"transform": item, "params": effective_params(fn, params)}
         t0 = time.time()
         traj = None
         mine: list[dict[str, Any]] = []
@@ -306,9 +333,9 @@ async def run(samples: list[Any], tokenizer: Any, args: Any = None, strict: bool
                     json.dumps(calls, default=str, ensure_ascii=False) + "\n")
         except OSError:
             logger.exception("[prl] transform: could not write to %s", trial_dir)
-    logger.info("[prl] transform %s on %s: %s; %d/%d trained tokens kept",
+    logger.info("[prl] transform %s on %s: %s; steps changed: %s; %d/%d trained tokens kept",
                 ",".join(e["transform"] for e in log), trial_dir, ",".join(e["status"] for e in log),
-                record["trained_tokens_after"], before)
+                describe_changes(changed_steps(record)), record["trained_tokens_after"], before)
     if not strict:
         _count([e["status"] for e in log], changed, trial_dir)
     return samples

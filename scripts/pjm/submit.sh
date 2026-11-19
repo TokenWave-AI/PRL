@@ -2,7 +2,8 @@
 # Submit a chain job under Fujitsu PJM (pjsub), from the repo root on a login node; called by scripts/submit.sh for a
 # site whose profile sets PRL_SCHEDULER=pjm. Runs scripts/pjm/job.sh on as many nodes as the chain's arms ask for
 # (their NNODES). Site settings (configs/sites/<site>.env):
-#   PRL_PJM_RSCGRP          resource group (pjsub -L rscgrp=...); RESERVATION=<id> submits to a reservation instead
+#   PRL_PJM_RSCGRP          resource group (pjsub -L rscgrp=...; QUEUE=<group> overrides it for one submission);
+#                           RESERVATION=<id> submits to a reservation instead
 #   PRL_PJM_ARGS            further pjsub options, e.g. "-L jobenv=singularity"
 #   PRL_PJM_MULTINODE_HOURS longest elapse of a job on more than one node, if the group has a shorter limit for them
 # ELAPSE (hh:mm:ss) overrides the chain's default (168 h with train_eval, 8 h with a smoke or an evaluation, else 2 h).
@@ -18,7 +19,7 @@ if [ "$nodes" -gt 1 ] && [ -n "${PRL_PJM_MULTINODE_HOURS:-}" ] && [ "${elapse%%:
   elapse=$PRL_PJM_MULTINODE_HOURS:00:00
 fi
 if [ -n "${RESERVATION:-}" ]; then where=(-r "$RESERVATION" -L "node=$nodes,elapse=$elapse")
-else where=(-L "rscgrp=${PRL_PJM_RSCGRP:?set PRL_PJM_RSCGRP in configs/sites/$PRL_SITE.env},node=$nodes,elapse=$elapse"); fi
+else where=(-L "rscgrp=${QUEUE:-${PRL_PJM_RSCGRP:?set PRL_PJM_RSCGRP in configs/sites/$PRL_SITE.env}},node=$nodes,elapse=$elapse"); fi
 read -ra extra <<< "${PRL_PJM_ARGS:-}"
 submit_job pjsub "${where[@]}" "${extra[@]}" -N "${CHAIN//+/_}" -o "$PRL_EXT/logs/pjm_%n_%j.out" -x "$vars" \
   scripts/pjm/job.sh
