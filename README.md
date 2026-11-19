@@ -66,10 +66,10 @@ It uses only Reweight. Given the returned `traj`, the framework removes the mask
 **Run it, one command**: train Qwen3.5-9B with ATLAS on OpenThoughts-Agent-v1-RL, then evaluate it on TB-dev (one job on 4 GPUs, about 15 h):
 
 ```bash
-PRL_SITE=<site> TRANSFORM=atlas bash scripts/quickstart.sh
+PRL_SITE=mysite TRANSFORM=atlas bash scripts/quickstart.sh
 ```
 
-`<site>` is your cluster, set up once in [two steps](#quick-start); to try the function without a GPU first, on 8 recorded trajectories: [Quick start ②](#quick-start).
+`mysite` is your cluster's site profile, set up once as the [Quick start](#quick-start) shows, step by step; to try the function without a GPU first, on 8 recorded trajectories: [Quick start ②](#quick-start).
 
 ## What your function can change
 
@@ -153,27 +153,71 @@ Reweight, Rewrite and Reroll all train end to end in a full run; how best to use
 
 ## Quick start
 
-**Set up once: two steps** (details: [`docs/setup.md`](docs/setup.md)).
+You need: one node of 4 GPUs (≥ 90 GB each, ≥ 768 GB of RAM) with Apptainer or SingularityCE, an E2B-compatible sandbox service with a container registry it pulls from, an OpenAI-compatible endpoint for the judge, and a linux/amd64 machine with Docker for steps 4–5 (it may be the cluster). Details: [`docs/setup.md`](docs/setup.md).
 
-| # | Step | Command |
-|---|---|---|
-| 1 | Site profile: the scheduler (PBS, PJM or none), a work directory, an E2B-compatible sandbox service and the registry it pulls from, the judge (any OpenAI-compatible endpoint) | `cp configs/sites/example.env configs/sites/<site>.env`, then fill in its first block and put the key files where it names them (`$PRL_EXT/private/`, chmod 600; SingularityCE instead of Apptainer, or Python < 3.10 on the hosts: also its "Only for some sites") |
-| 2 | Sandboxes: an image and a template per task, on a machine with Docker (another than the cluster: [`docs/setup.md`](docs/setup.md#site-specifics)) | `PRL_SITE=<site> bash scripts/setup/build_sandboxes.sh` |
-
-**A quicker first try**: with `PRL_SANDBOX_SMOKE_ONLY=1`, step 2 builds only 8 tasks (minutes), and the command below then tries the transform on them (2 updates, about 30 min; the job asks for 2 h) instead of training.
-
-**Then run: one command.** From the repository root on the cluster:
+**1. Get the code** on the cluster, in a directory the compute nodes can write:
 
 ```bash
-PRL_SITE=<site> bash scripts/quickstart.sh                          # signed ATLAS (58.09% in the results)
-PRL_SITE=<site> TRANSFORM=atlas bash scripts/quickstart.sh          # any transform of transforms/, yours too
+git clone https://github.com/TokenWave-AI/PRL.git && cd PRL
 ```
 
-One job on one node of 4 GPUs (≥ 90 GB each, ≥ 768 GB of RAM) trains Qwen3.5-9B on OpenThoughts-Agent-v1-RL (68 updates) and evaluates it on TB-dev: about 15 h. The first job also pulls the container image, downloads the tasks and the weights, and runs a short framework smoke.
+**2. Write your site profile**: copy the example, then fill in its first block (the scheduler and queue, a work directory `PRL_EXT`, the sandbox service, the registry, the judge). SingularityCE instead of Apptainer, or Python < 3.10 on the hosts: also uncomment its "Only for some sites".
 
+```bash
+cp configs/sites/example.env configs/sites/mysite.env      # mysite: any name; then edit the file
+```
+
+**3. Put the key files** where the profile looks for them (`/path/to/work` is your `PRL_EXT`):
+
+```bash
+mkdir -p /path/to/work/private && chmod 700 /path/to/work/private
+cp <sandbox service key> /path/to/work/private/e2b_api_key
+cp <judge key> /path/to/work/private/judge_api_key
+cp <registry credentials> /path/to/work/private/registry_credentials.json   # {"username": ..., "password": ...}
+chmod 600 /path/to/work/private/*
+```
+
+**4. Log Docker in to the registry**, on the machine with Docker (the build runs `sudo docker`):
+
+```bash
+sudo docker login <registry>
+```
+
+**5. Build the sandboxes** (an image and a template per task) on that machine; for a first try only the smoke's 8 tasks, a few minutes:
+
+```bash
+PRL_SITE=mysite PRL_SANDBOX_SMOKE_ONLY=1 bash scripts/setup/build_sandboxes.sh
+```
+
+Docker on another machine than the cluster: there too steps 1–4 with the same `configs/sites/mysite.env` (git ignores it: copy it) and `PRL_EXT` set to a directory of that machine, then copy what step 5 made to the cluster: `rsync -a <that PRL_EXT>/task_snapshots <cluster>:/path/to/work/` ([`docs/setup.md`](docs/setup.md#site-specifics)).
+
+**6. Run** on the cluster's login node. With the 8 sandboxes it tries signed ATLAS on them (2 updates, about 30 min; the job asks for 2 h); the first job also pulls the container image, downloads the tasks and the weights and checks the 8 sandboxes. It prints where its logs are.
+
+```bash
+PRL_SITE=mysite bash scripts/quickstart.sh
+```
+
+`DRY_RUN=1` in front prints the scheduler command and submits nothing; a busy queue: `QUEUE=<queue>` (a short debug queue: with `ELAPSE=01:00:00`).
+
+**7. See the first update** in the run's `train.log` (the path step 6 printed):
+
+```bash
+grep -m1 "step 0:" /path/to/work/runs/grpo_ota_train_smoke_<job id>/train.log
+```
+
+**8. Train for real**: build the other sandboxes (hours), then the same command trains Qwen3.5-9B on OpenThoughts-Agent-v1-RL (68 updates) and evaluates it on TB-dev, in one job of about 15 h:
+
+```bash
+PRL_SITE=mysite bash scripts/setup/build_sandboxes.sh      # on the machine with Docker, as in step 5
+PRL_SITE=mysite bash scripts/quickstart.sh                 # on the cluster, as in step 6
+```
+
+**Options** (steps 6 and 8):
+
+- Another transform: `TRANSFORM=atlas` (any of `transforms/`, yours too: below); the default is signed ATLAS, 58.09% in the results, with the judge at the reasoning effort low that its arm sets (`PRL_JUDGE_EXTRA_BODY`; the 58.09% run used gpt-6.1-sol).
 - Parameters: `PRL_TRANSFORM_ARGS='{"other_weight": 0.3}'`; algorithm: `ALGO=reinforce_plus_plus` (`ALGO=ppo` after its own smoke, [`CONTRIBUTING.md`](CONTRIBUTING.md)); chains: `TRANSFORM=rewrite+atlas` (run in order; `+`, not a comma, because the submit commands split variables on commas), with params per name: `PRL_TRANSFORM_ARGS='{"atlas": {"other_weight": 0.3}}'`.
-- The judge is the one of your site profile; the 58.09% run used gpt-6.1-sol, at the reasoning effort low that the signed ATLAS arm sets (`PRL_JUDGE_EXTRA_BODY`).
-- The command prints where the logs are. Each update logs a line `step N: {'train/loss': ...}` in the run's `train.log` (`$PRL_EXT/runs/<run>/`); what the transform did, a line per trajectory: `[prl] transform <name> on <trajectory>: ok; steps changed: <e.g. 5 weighted, 2 masked>; <kept>/<all> trained tokens kept` (`[prl] step weights: ...`, one line per training rank, counts samples, a trajectory split by the context summary being several, and step weights only, not masks; its last count, `with subgroup advantage spans`, the samples scored against their reroll siblings); the TB-dev score is `eval/heldout` in the evaluation's. A full run stopped by its time limit goes on when the same command is run again.
+- What the transform did, a line per trajectory in `train.log`: `[prl] transform <name> on <trajectory>: ok; steps changed: <e.g. 5 weighted, 2 masked>; <kept>/<all> trained tokens kept` (`[prl] step weights: ...`, one line per training rank, counts samples, a trajectory split by the context summary being several, and step weights only, not masks; its last count, `with subgroup advantage spans`, the samples scored against their reroll siblings). The TB-dev score is `eval/heldout` in the evaluation's `train.log`.
+- A full run stopped by its time limit goes on when the same command is run again.
 
 **Your own transform: write, try, train.**
 
@@ -201,7 +245,7 @@ PRL_TRANSFORM=my_transform MODEL_HF_DIR=tokenizer \
 PRL_TRANSFORM_CHECK_OUT=/tmp/check python -m prl.transforms.check
 ```
 
-A function that asks a model uses the judge of the site profile: `set -a; source configs/sites/<site>.env; set +a` first (on another machine than the cluster, `export PRL_JUDGE_KEY_FILE=<the key file here>` before it). What the quick start trains by default: `PRL_TRANSFORM=atlas_signed PRL_TRANSFORM_ARGS='{"failed_good_weight": 0.0}'`.
+A function that asks a model uses the judge of the site profile: `set -a; source configs/sites/mysite.env; set +a` first (on another machine than the cluster, `export PRL_JUDGE_KEY_FILE=<the key file here>` before it). What the quick start trains by default: `PRL_TRANSFORM=atlas_signed PRL_TRANSFORM_ARGS='{"failed_good_weight": 0.0}'`.
 
 - The terminal shows one line per trajectory: `[transform check] <trajectory>: reward <reward>, <steps> steps, <status>, steps changed: <e.g. 5 weighted, 2 masked>, trained tokens <before> -> <after>, <seconds> s`,
   where the status is `ok` or `skipped` (a skipped line ends with the reason; between them the framework's own lines, `[prl] transform ... trained tokens kept`, and with a judge its HTTP requests). A last line `passed` means it passed; otherwise it prints `FAILED`, the trajectory and the reason.
@@ -210,7 +254,7 @@ A function that asks a model uses the judge of the site profile: `set -a; source
 - The step lists count from 0, as `step.index`; ATLAS' own labels (`critical`, `good` / `bad`, `atlas_labels.json`) from 1, as in the judge's prompt.
 - A reroll is only recorded here (`reroll` in `transform.json`: the steps and the turns to replay); its branches run in training, where the quick start picks the arm a reroll needs by itself.
 
-**③ Train and evaluate it**: `PRL_SITE=<site> TRANSFORM=my_transform bash scripts/quickstart.sh`. The job first runs your function on the recorded trajectories and does not start training if it raises, times out or skips them all.
+**③ Train and evaluate it**: `PRL_SITE=mysite TRANSFORM=my_transform bash scripts/quickstart.sh`. The job first runs your function on the recorded trajectories and does not start training if it raises, times out or skips them all.
 
 ## Going further
 

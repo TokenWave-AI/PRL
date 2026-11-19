@@ -1,6 +1,7 @@
 # Setting up a site
 
-A site is a cluster, or a single machine, that runs PRL. Set it up once, in two steps:
+A site is a cluster, or a single machine, that runs PRL. The README's [Quick start](../README.md#quick-start) goes
+through it step by step, command by command; this page has the details. In short, set it up once, in two parts:
 
 | # | Step | Command |
 |---|---|---|
