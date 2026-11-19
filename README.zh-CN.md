@@ -9,7 +9,7 @@
 
 # PRL: Programmable Reinforcement Learning for Agents
 
-<p align="center"><a href="transforms/README.zh-CN.md">文档</a> · <a href="#快速开始">快速开始</a> · <a href="https://huangtubaye233.github.io/tw-prl/">博客</a> · <a href="README.md">English</a></p>
+<p align="center"><a href="transforms/README.zh-CN.md">文档</a> · <a href="#快速开始">快速开始</a> · <a href="https://tokenwave-ai.github.io/PRL/">博客</a> · <a href="README.md">English</a></p>
 
 **PRL** 是一个基于 Miles 的 Agentic RL 训练框架。PRL 允许每条轨迹在**跑完之后、训练计算 advantage 之前**插入一个高度灵活的 Python 函数。函数里能做三件事：
 
