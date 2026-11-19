@@ -153,7 +153,16 @@ Reweight, Rewrite and Reroll all train end to end in a full run; how best to use
 
 ## Quick start
 
-**Run: one command.** From the repository root, on a site set up once (below):
+**Set up once: two steps** (details: [`docs/setup.md`](docs/setup.md)).
+
+| # | Step | Command |
+|---|---|---|
+| 1 | Site profile: the scheduler (PBS, PJM or none), a work directory, an E2B-compatible sandbox service and the registry it pulls from, the judge (any OpenAI-compatible endpoint) | `cp configs/sites/example.env configs/sites/<site>.env`, then fill in its first block and put the key files where it names them (`$PRL_EXT/private/`, chmod 600; SingularityCE instead of Apptainer, or Python < 3.10 on the hosts: also its "Only for some sites") |
+| 2 | Sandboxes: an image and a template per task, on a machine with Docker (another than the cluster: [`docs/setup.md`](docs/setup.md#site-specifics)) | `PRL_SITE=<site> bash scripts/setup/build_sandboxes.sh` |
+
+**A quicker first try**: with `PRL_SANDBOX_SMOKE_ONLY=1`, step 2 builds only 8 tasks (minutes), and the command below then tries the transform on them (2 updates, about 30 min; the job asks for 2 h) instead of training.
+
+**Then run: one command.** From the repository root on the cluster:
 
 ```bash
 PRL_SITE=<site> bash scripts/quickstart.sh                          # signed ATLAS (58.09% in the results)
@@ -165,15 +174,6 @@ One job on one node of 4 GPUs (≥ 90 GB each, ≥ 768 GB of RAM) trains Qwen3.5
 - Parameters: `PRL_TRANSFORM_ARGS='{"other_weight": 0.3}'`; algorithm: `ALGO=reinforce_plus_plus` (`ALGO=ppo` after its own smoke, [`CONTRIBUTING.md`](CONTRIBUTING.md)); chains: `TRANSFORM=rewrite+atlas` (run in order; `+`, not a comma, because the submit commands split variables on commas), with params per name: `PRL_TRANSFORM_ARGS='{"atlas": {"other_weight": 0.3}}'`.
 - The judge is the one of your site profile; the 58.09% run used gpt-6.1-sol, at the reasoning effort low that the signed ATLAS arm sets (`PRL_JUDGE_EXTRA_BODY`).
 - The command prints where the logs are. Each update logs a line `step N: {'train/loss': ...}` in the run's `train.log` (`$PRL_EXT/runs/<run>/`); what the transform did, a line per trajectory: `[prl] transform <name> on <trajectory>: ok; steps changed: <e.g. 5 weighted, 2 masked>; <kept>/<all> trained tokens kept` (`[prl] step weights: ...`, one line per training rank, counts samples, a trajectory split by the context summary being several, and step weights only, not masks; its last count, `with subgroup advantage spans`, the samples scored against their reroll siblings); the TB-dev score is `eval/heldout` in the evaluation's. A full run stopped by its time limit goes on when the same command is run again.
-
-**Set up once: two steps** (details: [`docs/setup.md`](docs/setup.md)).
-
-| # | Step | Command |
-|---|---|---|
-| 1 | Site profile: the scheduler (PBS, PJM or none), a work directory, an E2B-compatible sandbox service and the registry it pulls from, the judge (any OpenAI-compatible endpoint) | `cp configs/sites/example.env configs/sites/<site>.env`, then fill in its first block and put the key files where it names them (`$PRL_EXT/private/`, chmod 600; SingularityCE instead of Apptainer, or Python < 3.10 on the hosts: also its "Only for some sites") |
-| 2 | Sandboxes: an image and a template per task, on a machine with Docker (another than the cluster: [`docs/setup.md`](docs/setup.md#site-specifics)) | `PRL_SITE=<site> bash scripts/setup/build_sandboxes.sh` |
-
-**A quicker first try**: with `PRL_SANDBOX_SMOKE_ONLY=1`, step 2 builds only 8 tasks (minutes), and the same command then tries the transform on them (2 updates, about 30 min; the job asks for 2 h) instead of training.
 
 **Your own transform: write, try, train.**
 

@@ -153,7 +153,16 @@ Reweight、Rewrite、Reroll 三层都能在完整训练里跑通；教师的改�
 
 ## 快速开始
 
-**运行：一条命令。** 在配好的站点上（配置见下），于仓库根目录运行：
+**一次性配置：两步**（细节见 [`docs/setup.md`](docs/setup.md)）。
+
+| # | 步骤 | 命令 |
+|---|---|---|
+| 1 | 站点配置：调度器（PBS、PJM 或不用调度器）、一个工作目录、一个兼容 E2B 的沙盒服务和它拉镜像的 registry、判官（任何 OpenAI 兼容接口） | `cp configs/sites/example.env configs/sites/<site>.env`，填好最上面一段，把 key 文件放到它写的位置（`$PRL_EXT/private/`，chmod 600；用 SingularityCE 而不是 Apptainer，或者机器上 Python < 3.10：再看 "Only for some sites" 一段） |
+| 2 | 沙盒：每个任务一个镜像和一个 template，在一台有 Docker 的机器上（不是集群那台时：[`docs/setup.md`](docs/setup.md#site-specifics)） | `PRL_SITE=<site> bash scripts/setup/build_sandboxes.sh` |
+
+**想先快速试一下**：第 2 步加 `PRL_SANDBOX_SMOKE_ONLY=1` 只建 8 个任务（几分钟），下面那条命令就改成在这 8 个任务上试 transform（2 次更新，约 30 分钟；作业申请 2 小时），不做完整训练。
+
+**然后运行：一条命令。** 在集群上的仓库根目录运行：
 
 ```bash
 PRL_SITE=<site> bash scripts/quickstart.sh                          # signed ATLAS（结果表里的 58.09%）
@@ -165,15 +174,6 @@ PRL_SITE=<site> TRANSFORM=atlas bash scripts/quickstart.sh          # transforms
 - 改参数：`PRL_TRANSFORM_ARGS='{"other_weight": 0.3}'`；换算法：`ALGO=reinforce_plus_plus`（`ALGO=ppo` 要先跑它自己的烟测，见 [`CONTRIBUTING.md`](CONTRIBUTING.md)）；串联：`TRANSFORM=rewrite+atlas`（按顺序执行；用 `+` 不用逗号，因为提交命令按逗号切分变量），参数按名字给：`PRL_TRANSFORM_ARGS='{"atlas": {"other_weight": 0.3}}'`。
 - 判官用站点配置里的；58.09% 那次用的是 gpt-6.1-sol，reasoning effort 是 signed ATLAS 的 arm 默认的 low（`PRL_JUDGE_EXTRA_BODY`）。
 - 命令会打印日志在哪里。每次更新在这次运行的 `train.log`（`$PRL_EXT/runs/<run>/`）里记一行 `step N: {'train/loss': ...}`；transform 对每条轨迹做了什么，各有一行 `[prl] transform <名字> on <轨迹>: ok; steps changed: <如 5 weighted, 2 masked>; <保留>/<全部> trained tokens kept`（`[prl] step weights: ...` 每个训练 rank 一行，按样本计数，被上下文总结切开的轨迹算多个样本，而且只统计步骤权重，不含 mask；它最后一项 `with subgroup advantage spans` 是和 reroll 兄弟分支比较打分的样本数）；TB-dev 分数是评测那份 `train.log` 里的 `eval/heldout`。完整训练到时限被停掉的话，再运行同一条命令会接着跑。
-
-**一次性配置：两步**（细节见 [`docs/setup.md`](docs/setup.md)）。
-
-| # | 步骤 | 命令 |
-|---|---|---|
-| 1 | 站点配置：调度器（PBS、PJM 或不用调度器）、一个工作目录、一个兼容 E2B 的沙盒服务和它拉镜像的 registry、判官（任何 OpenAI 兼容接口） | `cp configs/sites/example.env configs/sites/<site>.env`，填好最上面一段，把 key 文件放到它写的位置（`$PRL_EXT/private/`，chmod 600；用 SingularityCE 而不是 Apptainer，或者机器上 Python < 3.10：再看 "Only for some sites" 一段） |
-| 2 | 沙盒：每个任务一个镜像和一个 template，在一台有 Docker 的机器上（不是集群那台时：[`docs/setup.md`](docs/setup.md#site-specifics)） | `PRL_SITE=<site> bash scripts/setup/build_sandboxes.sh` |
-
-**想先快速试一下**：第 2 步加 `PRL_SANDBOX_SMOKE_ONLY=1` 只建 8 个任务（几分钟），同一条命令就改成在这 8 个任务上试 transform（2 次更新，约 30 分钟；作业申请 2 小时），不做完整训练。
 
 **写自己的 transform：写、试、训。**
 
