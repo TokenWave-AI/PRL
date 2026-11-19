@@ -55,6 +55,8 @@ if [ "$ready" -lt "$tasks" ]; then
   if [ "$TRANSFORM" = atlas_signed ]; then  # its judge at low effort, as in the full run
     export ARM=${ARM:-ota_train_smoke_atlas_signed} PRL_TRANSFORM_ARGS=${PRL_TRANSFORM_ARGS:-'{"failed_good_weight": 0.0}'}
   fi
+  # a transform that rerolls: the try's arm with the same post-process
+  [ "${ARM:-}" != ota_train_transform_reroll ] || export ARM=ota_train_smoke_reroll
   export CHAIN=prepare+download+convert+smoke_grpo
   follow 'grpo_ota_train_smoke_<job id>'; exec bash scripts/submit.sh
 fi

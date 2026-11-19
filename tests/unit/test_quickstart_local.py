@@ -88,6 +88,10 @@ def test_quickstart_follows_the_sandboxes_built(tmp_path: Path) -> None:
                  "TRANSFORM=atlas_signed", "PRL_TRANSFORM_ARGS_FILE=", "walltime=08:00:00"):
         assert part in tried.stdout, part
     assert "train_eval" not in tried.stdout
+    reroll = _run(["bash", "scripts/quickstart.sh"], tmp_path, PRL_SITE="_test_qs_pbs", DRY_RUN="1",
+                  TRANSFORM="atlas", ARM="ota_train_transform_reroll")
+    assert reroll.returncode == 0, reroll.stderr
+    assert "ARM=ota_train_smoke_reroll," in reroll.stdout and "TRANSFORM=atlas" in reroll.stdout
     rpp = _run(["bash", "scripts/quickstart.sh"], tmp_path, PRL_SITE="_test_qs_pbs", DRY_RUN="1",
                ALGO="reinforce_plus_plus")
     assert rpp.returncode != 0 and "8 have a template" in rpp.stderr
