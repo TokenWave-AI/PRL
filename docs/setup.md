@@ -33,18 +33,18 @@ dependencies, the tasks (728 training + 70 TB-dev), the weights and their Megatr
   start command then tries the transform on them (2 updates, about 30 min; the job asks for 2 h) instead of training.
   Step 2 run again without it builds the rest. The smoke splits half of its trials with the context summary on
   purpose; a transform that rewrites or rerolls skips those (a split trajectory cannot be rewritten).
-- **Logs**: in `$PRL_EXT/logs/`; each run's `train.log` (`$PRL_EXT/runs/<run>/`) has a line per update,
-  `step N: {'train/loss': ...}`; the quick start prints both places. Harmless at the start: SGLang's `post-warmup
-  freeze_gc failed` with a `Connection refused` traceback, FlashInfer's `workspace preflight probe failed (...
+- **Logs**: in `$PRL_EXT/logs/`; each run's `train.log` (`$PRL_EXT/runs/<run>/`) has a line per update, `step N:
+  {'train/loss': ...}`; the quick start prints both places. Harmless at the start: SGLang's `post-warmup freeze_gc
+  failed` with a `Connection refused` traceback, FlashInfer's `workspace preflight probe failed (...
   CUDA_ERROR_NOT_SUPPORTED: 801)` on GB200, and Apptainer's `signature not found` for the pulled (unsigned) image. Later
   a trial's `failed to send non-blocking keys ... no server running` (Harbor's tmux) is tried again by itself
-  (`rollout/abort_retried_trials`), as is one that Harbor aborts with `Command ended without an end event` (a
-  traceback, then Miles' unrelated `All samples truncated`; then `trial aborted, retrying it alone`), and one with `mismatch_refill rejected` (its tokens did not match the
-  inference server's; `exhausted`: its group is replaced).
+  (`rollout/abort_retried_trials`), as is one that Harbor aborts with `Command ended without an end event` (a traceback,
+  then Miles' unrelated `All samples truncated`; then `trial aborted, retrying it alone`), and one with `mismatch_refill
+  rejected` (its tokens did not match the inference server's; `exhausted`: its group is replaced).
 - `DRY_RUN=1` prints the scheduler command and submits nothing; `ELAPSE=hh:mm:ss` sets a job's time limit and
   `QUEUE=<queue>` its queue (PBS) or resource group (PJM), e.g. a short debug queue for the quicker first try, with
-  the first job's steps run ahead (below). A job stopped by its time limit goes on when the same command is run
-  again.
+  `ELAPSE` within its limit (`ELAPSE=01:00:00` is enough when the image is already pulled: below). A job stopped by its
+  time limit goes on when the same command is run again.
 - `PRL_SITE=<site> CHAIN=task_check bash scripts/submit.sh` checks the smoke's 8 sandboxes alone (the official
   solution must score 1, a no-op agent 0); the first smoke does it by itself.
 - The first job's steps, to run ahead (e.g. under a short time limit): `CHAIN=prepare` (image, Harbor, tasks),
