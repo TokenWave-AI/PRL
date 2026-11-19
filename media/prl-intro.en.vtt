@@ -1,23 +1,30 @@
 WEBVTT
 
-00:00:00.000 --> 00:00:05.000
-An agent can finish the task and still take unhelpful steps.
+00:00:00.000 --> 00:00:06.204
+The tests pass, but one step only repeated a failed command.
 
-00:00:05.000 --> 00:00:11.000
-PRL puts a Python function between rollout and advantage computation.
+00:00:06.204 --> 00:00:12.057
+PRL puts a Python function between rollout and the policy
+update.
 
-00:00:11.000 --> 00:00:17.000
-Reweight steps or text spans. Mask what you do not want to learn.
+00:00:12.057 --> 00:00:14.984
+Your idea goes into one function. PRL calls it on every finished
+trajectory.
 
-00:00:17.000 --> 00:00:23.000
-Rewrite reasoning, commands, or outputs. Edited text can be context
-only.
+00:00:14.984 --> 00:00:26.691
+Reweight: decide how much each step, or its reasoning, trains. A
+judge can pick the steps.
 
-00:00:23.000 --> 00:00:30.000
-Replay a prefix, let the policy continue, and train on the new samples.
+00:00:26.691 --> 00:00:35.472
+Rewrite: edit what a step says. The new text can stay context
+only, out of the loss.
 
-00:00:30.000 --> 00:00:35.000
-Use Reweight, Rewrite, and Reroll in your own transform.
+00:00:35.472 --> 00:00:47.179
+Reroll: let the policy try again from a step. The new samples
+are scored by the tests.
 
-00:00:35.000 --> 00:00:40.000
-Start with PRL. Try a transform of your own.
+00:00:47.179 --> 00:00:55.960
+Mix all three in one function, or chain ready transforms.
+
+00:00:55.960 --> 00:01:02.000
+Start with a transform: github.com/TokenWave-AI/PRL
