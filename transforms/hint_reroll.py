@@ -17,7 +17,8 @@ trial) or its hint is longer than ``max_hint_words`` or reads like a command (ba
 redirections) or spans several lines.
 
 Params: ``n`` (branches, default 2), ``prompt`` (transforms/rewrite_prompts/<prompt>.md, default hint_v2: where to look
-again, not what is wrong; hint_v1 also names the mistake), ``max_hint_words`` (default 15; with hint_v1 pass 25, the length its prompt was written for),
+again, not what is wrong; hint_v3 stricter: only the part to look at, no detail inside it; hint_v1 also names the
+mistake), ``max_hint_words`` (default 15; with hint_v1 pass 25, the length its prompt was written for),
 ``test_chars`` (default 1500), ``credit`` (default verified; subgroup or member to compare). On 16 failed trials of one of
 our runs both prompts picked the same fork steps. Passed trials, trials split by a summary and trials in which the judge
 finds no step to do better are left as they are. The decision is in ``traj.record["hint_reroll"]``, the judge's calls in ``<trial_dir>/transform_calls.json``.
@@ -48,7 +49,7 @@ async def hint_reroll(traj: Trajectory, n: int = 2, prompt: str = "hint_v2", max
     if traj.reward is None or traj.reward > 0:
         record["why"] = f"reward {traj.reward}: only failed trials branch"
         return traj
-    if len(traj.samples) > 1:
+    if traj.split:
         record["why"] = "split by a summary"
         return traj
     if len(traj.steps) < 2:

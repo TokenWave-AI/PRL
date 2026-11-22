@@ -32,6 +32,7 @@ from types import SimpleNamespace
 from typing import Any
 
 from prl.transforms import core
+from prl.transforms.api import Trajectory
 
 logger = logging.getLogger(__name__)
 
@@ -80,6 +81,18 @@ def samples(trial: dict[str, Any], tokenizer: Any, trial_dir: str) -> list[Any]:
 
 
 CHANGES, changed_steps = core.CHANGES, core.changed_steps  # the check line's step counts
+
+
+def load_trajectories(tokenizer_dir: str | Path = "tokenizer", fixture: str | Path | None = None) -> list[Trajectory]:
+    """The recorded trajectories as your function gets them, to look at in a REPL (no model call, nothing written):
+
+        from prl.transforms.check import load_trajectories
+        trajs = load_trajectories("tokenizer")          # the directory of Quick start step 2's tokenizer.json
+        print(trajs[0].reward, trajs[0].steps[1].command, trajs[0].steps[1].terminal)
+    """
+    tokenizer = Tokenizer(str(tokenizer_dir))
+    trials = json.loads(gzip.decompress(Path(fixture or FIXTURE).read_bytes()))["trials"]
+    return [Trajectory.of(samples(trial, tokenizer, ""), tokenizer) for trial in trials]
 
 
 async def check(tokenizer: Any, fixture: Path, out: Path, timeout: float, args: Any = None) -> dict[str, Any]:

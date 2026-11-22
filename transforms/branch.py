@@ -5,14 +5,18 @@ named in the run's settings, built in or the user's own:
 
     select    where to branch: the steps (anchors), best first
     allocate  how many branches from each anchor
-    credit    how a branch trains: ``member`` (one more member of the prompt's group) or ``subgroup`` (only against its
-              siblings: the other branches of the step and the trial from the step on; GRPO only)
+    credit    how a branch trains: ``member`` (one more member of the prompt's group), ``subgroup`` (only against its
+              siblings: the other branches of the step and the trial from the step on; GRPO only) or ``verified``
+              (as subgroup when a branch beats the trial, which then clears the trial's prefix; GRPO only)
 
     PRL_TRANSFORM_ARGS='{"select": "first_bad", "allocate": {"name": "fixed", "n": 2}, "credit": "subgroup"}'
 
 A plug-in is a name or {"name": ..., <its params>}. A name that is not built in is the function of the same name in
 ``transforms/<name>.py`` (as for transforms): ``select(traj, **params)`` returns steps (``Step`` or 0-based index),
-optionally as (step, score) pairs; ``allocate(traj, anchors, **params)`` returns (step, n) pairs, n 0 for none.
+optionally as (step, score) pairs or {"step": ..., "hint": "..."} (a hint for that step's branches);
+``allocate(traj, anchors, **params)`` returns (step, n) pairs, n 0 for none. ``hint`` (default none) is shown to every
+branch's policy before its step (``step.reroll(hint=...)``: part of its prompt, never trained) unless select gave one.
+A selection that ranks (``top``) ranks every step, so the steps before ``min_step`` drop out before its top are taken.
 
 Built in:
     select    middle      the middle turn (framework tests)
@@ -112,7 +116,7 @@ def _step(traj: Trajectory, x: Any) -> Step:
 
 
 async def branch(traj: Trajectory, select: Any = "middle", allocate: Any = "fixed", credit: str = "member",
-                 min_step: int = 1, max_anchors: int = 1) -> Trajectory:
+                 min_step: int = 1, max_anchors: int = 1, hint: str | None = None) -> Trajectory:
     s_name, s_fn, s_params = _plugin(select, SELECT, "select")
     a_name, a_fn, a_params = _plugin(allocate, ALLOCATE, "allocate")
     if a_fn is allocate_fixed:
@@ -138,18 +142,22 @@ async def branch(traj: Trajectory, select: Any = "middle", allocate: Any = "fixe
     if traj.skipped is not None:
         return traj
     anchors: list[Step] = []
+    hints: dict[int, str] = {}  # a step's own hint, from select
     for x in picked or []:
-        step = _step(traj, x[0] if isinstance(x, tuple) else x)
+        step = _step(traj, x["step"] if isinstance(x, dict) else x[0] if isinstance(x, tuple) else x)
         if step.index >= min_step and not any(step is a for a in anchors):
             anchors.append(step)
+            if isinstance(x, dict) and x.get("hint"):
+                hints[step.index] = x["hint"]
     anchors = anchors[:max_anchors if top is None else min(max_anchors, top)]
     plan = await _call(a_fn, traj, anchors, **a_params)
     record["anchors"] = []
     for step, n in plan:
         step = _step(traj, step)
         if n:
-            step.reroll(int(n), credit)
-            record["anchors"].append({"step": step.index, "n": int(n)})
+            told = hints.get(step.index, hint)
+            step.reroll(int(n), credit, hint=told)
+            record["anchors"].append({"step": step.index, "n": int(n), **({"hint": told} if told else {})})
     if picked and not anchors:
         record["why"] = f"every selected step was before min_step {min_step}"
     return traj

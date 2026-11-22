@@ -14,7 +14,8 @@
 # (PRL_SANDBOX_SMOKE_ONLY=1) the same command tries the transform on them instead (CHAIN=...+smoke_grpo: 2 updates).
 # Variables: TRANSFORM (default atlas_signed), PRL_TRANSFORM_ARGS (JSON; atlas_signed's default
 # {"failed_good_weight": 0.0}, the 58.09% run), ALGO (grpo, the default; reinforce_plus_plus; ppo after a passed
-# CHAIN=smoke_ppo), PRL_RUN_ID (default quickstart); DRY_RUN=1 prints the scheduler command and submits nothing.
+# CHAIN=smoke_ppo), PRL_RUN_ID (default quickstart), PRL_NEEDS_JUDGE and ARM (see below: when reading the transform's
+# file guesses wrong); DRY_RUN=1 prints the scheduler command and submits nothing.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 : "${PRL_SITE:?set PRL_SITE to a site with configs/sites/<site>.env (see configs/sites/example.env, docs/setup.md)}"
@@ -30,14 +31,22 @@ case $ALGO in
 esac
 [ -f "configs/sites/$PRL_SITE.env" ] || { echo "no configs/sites/$PRL_SITE.env (copy configs/sites/example.env)" >&2; exit 1; }
 profile() { (export PRL_ROOT=$PWD; set -a; source "configs/sites/$PRL_SITE.env"; printf '%s' "${!1:-}"); }
-# a transform that asks a model (ask, or ATLAS' labeler) needs the judge of the profile before the job starts
-if grep -qE '(^|[^a-z_])ask\(|labeler\.' $(printf 'transforms/%s.py ' ${TRANSFORM//+/ }) &&
+# a transform that asks a model (ask, or ATLAS' labeler) needs the judge of the profile before the job starts. Found
+# by reading its file; PRL_NEEDS_JUDGE=0 / 1 says it instead (e.g. 0 for atlas with select="random", 1 for a function
+# that calls ask from a module of its own)
+needs_judge=${PRL_NEEDS_JUDGE:-}
+if [ -z "$needs_judge" ]; then
+  needs_judge=0; ! grep -qE '(^|[^a-z_])ask\(|labeler\.' $(printf 'transforms/%s.py ' ${TRANSFORM//+/ }) || needs_judge=1
+fi
+[[ $needs_judge == [01] ]] || { echo "PRL_NEEDS_JUDGE must be 0 or 1, got $needs_judge" >&2; exit 1; }
+if [ "$needs_judge" = 1 ] &&
    { [[ "$(profile PRL_JUDGE_API_BASE)$(profile PRL_JUDGE_MODEL)" == *"<"* ]] || [ -z "$(profile PRL_JUDGE_MODEL)" ] ||
      [ ! -s "$(profile PRL_JUDGE_KEY_FILE)" ]; }; then
   echo "$TRANSFORM asks a judge: set PRL_JUDGE_API_BASE, PRL_JUDGE_MODEL and the key file PRL_JUDGE_KEY_FILE in" \
-       "configs/sites/$PRL_SITE.env" >&2; exit 1
+       "configs/sites/$PRL_SITE.env (or PRL_NEEDS_JUDGE=0 if it does not call one)" >&2; exit 1
 fi
-# a transform that rerolls (step.reroll) trains with the branch post-process of the reroll arm (GRPO or PPO)
+# a transform that rerolls (step.reroll) trains with the branch post-process of the reroll arm (GRPO or PPO); found by
+# reading its file, an ARM given here wins (e.g. ARM=ota_train_transform for one whose reroll is switched off)
 if [ "$ALGO" != reinforce_plus_plus ] && grep -qE '\.reroll\(' $(printf 'transforms/%s.py ' ${TRANSFORM//+/ }); then
   export ARM=${ARM:-ota_train_transform_reroll}
 fi

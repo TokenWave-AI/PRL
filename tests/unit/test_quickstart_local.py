@@ -111,6 +111,15 @@ def test_quickstart_wants_the_judge_of_a_transform_that_asks(built: Path) -> Non
     plain = _run(["bash", "scripts/quickstart.sh"], built, PRL_SITE="_test_qs_pbs", DRY_RUN="1",
                  TRANSFORM="reroll_smoke", PRL_JUDGE_API_BASE="https://<provider>/v1")
     assert plain.returncode == 0, plain.stderr
+    # what reading the file guesses can be overridden: atlas with select="random" calls no judge
+    random = _run(["bash", "scripts/quickstart.sh"], built, PRL_SITE="_test_qs_pbs", DRY_RUN="1", TRANSFORM="atlas",
+                  PRL_TRANSFORM_ARGS='{"select": "random"}', PRL_NEEDS_JUDGE="0")
+    assert random.returncode == 0, random.stderr
+    forced = _run(["bash", "scripts/quickstart.sh"], built, PRL_SITE="_test_qs_pbs", DRY_RUN="1",
+                  TRANSFORM="reroll_smoke", PRL_NEEDS_JUDGE="1")
+    assert forced.returncode != 0 and "reroll_smoke asks a judge" in forced.stderr
+    bad = _run(["bash", "scripts/quickstart.sh"], built, PRL_SITE="_test_qs_pbs", DRY_RUN="1", PRL_NEEDS_JUDGE="yes")
+    assert bad.returncode != 0 and "PRL_NEEDS_JUDGE must be 0 or 1" in bad.stderr
 
 
 def test_quickstart_runs_your_transform_on_the_transform_arm(built: Path) -> None:
@@ -122,6 +131,9 @@ def test_quickstart_runs_your_transform_on_the_transform_arm(built: Path) -> Non
     reroll = _run(["bash", "scripts/quickstart.sh"], tmp_path, PRL_SITE="_test_qs_pbs", DRY_RUN="1",
                   TRANSFORM="reroll_smoke", PRL_RUN_ID="mine")
     assert reroll.returncode == 0 and "ARM=ota_train_transform_reroll," in reroll.stdout, reroll.stderr
+    given = _run(["bash", "scripts/quickstart.sh"], tmp_path, PRL_SITE="_test_qs_pbs", DRY_RUN="1",
+                 TRANSFORM="reroll_smoke", PRL_RUN_ID="mine", ARM="ota_train_transform")  # an ARM given wins
+    assert given.returncode == 0 and "ARM=ota_train_transform," in given.stdout, given.stderr
     missing = _run(["bash", "scripts/quickstart.sh"], tmp_path, PRL_SITE="_test_qs_pbs", DRY_RUN="1",
                    TRANSFORM="atlas+no_such_transform")
     assert missing.returncode != 0 and "no transforms/no_such_transform.py" in missing.stderr

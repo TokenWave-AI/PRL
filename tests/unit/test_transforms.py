@@ -891,3 +891,21 @@ def test_weight_text_finds_a_command_as_the_reply_escapes_it():
     step = traj.steps[0]
     step.weight_text(step.command["commands"][0]["keystrokes"], 0.0)  # "mkdir -p /output\n", decoded
     assert [reply[a:b] for a, b, _ in step._spans] == ["mkdir -p /output\\n"]
+
+
+def test_load_trajectories_gives_the_recorded_ones_as_a_function_gets_them(monkeypatch):
+    from prl.transforms import check
+
+    class Chars:  # no tokenizer download in a unit test
+        def __init__(self, path):
+            pass
+
+        def encode(self, text, add_special_tokens=False):
+            return [ord(c) for c in text]
+
+        def decode(self, ids):
+            return "".join(chr(i) for i in ids)
+    monkeypatch.setattr(check, "Tokenizer", Chars)
+    trajs = check.load_trajectories("unused")
+    assert len(trajs) == 8 and all(t.steps and t.reward in (0.0, 1.0) for t in trajs)
+    assert any(t.split for t in trajs) and not all(t.split for t in trajs)  # the smoke's fixture has split ones

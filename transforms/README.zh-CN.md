@@ -70,14 +70,19 @@ keystrokes 以 `\n` 结尾才执行，`C-c` 这类是按键，空的表示等待
   的 credit（只支持 GRPO）。
 - 一条轨迹可以有多处分支（对几个步骤分别调 `reroll`），每处最多 16 次。
 - 原轨迹照常训练（它的 mask 和权重照常生效；前缀的改写只进重放，原轨迹保持原样）。
-- 限制：不能在被改写的步骤上或之后分支；被上下文总结切开的轨迹不行；一个串联里只能有一个 transform 要求分支。
+- 限制：不能在被改写的步骤上或之后分支；被上下文总结切开的轨迹不行（`traj.split`：先判断，对它调 reroll 会报错）；一个串联里只能有
+  一个 transform 要求分支。第 0 步可以：它的分支什么都不重放，等于多一条从头开始的轨迹（分支模板的 `min_step` 和 `hint_reroll` 都不选它）。
+- 带提示之后训练的是什么：分支从这一步起的 token，所在的上下文里有提示，而测试时策略拿不到提示。能迁移到没有提示的情况多少还是开放
+  问题；把答案说出来的提示迁移得最少。`hint_reroll` 的 `prompt="hint_v3"` 比默认的 `hint_v2` 更严（只说看哪一部分，不点出里面的细节）；
+  同一个 transform 不给提示就是对照。
 - 运行需要分支的后处理：arm 用 `ota_train_transform_reroll`（它加了
   `--custom-reward-post-process-path prl.algo.added_rewards.group_rewards`）；快速开始遇到调用 `reroll` 的 transform 会自动选它，
   训练前的检查也会拦下没用它的作业。
 - 结果：轨迹目录下每个分支一个 `reroll/s<步>_b<序号>/`（请求、结果、`reroll_replay.json`：重放的每一轮终端输出和原来是否一致，
   不一致的把两边的内容也记下来）；指标 `rollout/reroll/*`（`requested_trials`、`branches`、`{ok,failed,subgroup}_branches`、`verified_steps`、`confirmed_steps`（有分支比原轨迹分高；`subgroup_branches` 只数 `credit="subgroup"`）、
   `reward_mean`、`source_reward_mean`、`seconds_mean`）。分支自己的 trial 目录和其它 trial 并列在 `harbor_trials/` 下
-  （没有 `transform.json`；分支的 `outcome.json` 里写着它）。
+  （没有 `transform.json`；分支的 `outcome.json` 里写着它）。每个结果有 `beat_trial`（分数比原轨迹高；`verified` 下就是它让原轨迹前缀
+  清零），原轨迹的 `transform.json` 在分支跑完后重写，带 `reroll`（各分支结果）和 `reroll_beaten_steps`。
 - 重放的终端输出是真实的，和原轨迹会有少量差别（时间、inode、git hash 这类）；框架记录、不拦截。
 
 ### 调模型
@@ -102,6 +107,9 @@ k = await ask(prompt, check=fn)     # prompt 是字符串或 messages 列表
 | `traj.record["key"] = 值` | 存进 `<trial_dir>/transform.json` |
 | `traj.add_sample(sample, reward)`、`traj.demonstrate(step, action, reward)` | 高级：自己构造额外的训练样本 |
 
+在 REPL 里看录好的轨迹（和函数拿到的一样）：`from prl.transforms.check import load_trajectories; trajs = load_trajectories("tokenizer")`
+（快速开始第 2 步的 tokenizer 目录），然后看 `trajs[0].steps[1].command`、`trajs[0].steps[1].terminal`、`trajs[0].split` 等。
+
 ## 3. 分支模板
 
 `TRANSFORM=branch`。所有"从中间重新 rollout"的方法都在回答三个问题，每个问题是一个可替换的插件：
@@ -116,8 +124,8 @@ TRANSFORM=branch PRL_TRANSFORM_ARGS='{"select": "first_bad", "allocate": {"name"
 
 ### select：在哪分支
 
-`select(traj, **参数) -> 步骤列表`（`Step` 或从 0 开始的步号，可以带分数写成 `(步, 分数)`，最好的在前）。select 里可以顺便改前面
-几步（只进重放）。
+`select(traj, **参数) -> 步骤列表`（`Step` 或从 0 开始的步号，可以带分数写成 `(步, 分数)`，或写成 `{"step": ..., "hint": "..."}`
+给这一步的分支一句提示；最好的在前）。select 里可以顺便改前面几步（只进重放）。模板的 `hint` 参数给所有分支同一句提示，select 给了的除外。
 
 | 内置 | 含义 |
 |---|---|
@@ -198,7 +206,7 @@ TRANSFORM=branch PRL_TRANSFORM_ARGS='{"select": "first_bad", "allocate": {"name"
 | `atlas_signed` | 判官分好 / 坏 / 一般；成功轨迹的坏步反着推 | `mode`（mild / strict）、`bad_weight`、`failed_good_weight`、`quote_bad`（只推出错的那段） |
 | `rewrite` | 教师小改轨迹；或只修失败的；或选点分支 | `prompt`、`mask_new`、`successes` / `failures`、`added="reroll"`、各种改动比例上限 |
 | `branch` | 分支模板（§3） | `select`、`allocate`、`credit`、`min_step`、`max_anchors` |
-| `hint_reroll` | 判官找失败轨迹第一个走错的步骤（记录里从 1 数，和它的 prompt 一致），写一句不超过 `max_hint_words` 词的提示（只说回头看哪里，不给命令）；策略带着提示从那里再试 `n` 次 | `n`（2）、`credit`（`verified`）、`prompt`（`hint_v2`；`hint_v1` 还会点出错在哪）、`max_hint_words`（15）、`test_chars`（判官能看到的测试输出末尾，1500） |
+| `hint_reroll` | 判官找失败轨迹第一个走错的步骤（记录里从 1 数，和它的 prompt 一致），写一句不超过 `max_hint_words` 词的提示（只说回头看哪里，不给命令）；策略带着提示从那里再试 `n` 次 | `n`（2）、`credit`（`verified`）、`prompt`（`hint_v2`；`hint_v3` 更严：只说看哪一部分；`hint_v1` 还会点出错在哪）、`max_hint_words`（15）、`test_chars`（判官能看到的测试输出末尾，1500） |
 | `reroll_smoke` | 测框架用：从中间一步分支 | `min_steps`、`edit`、`every` |
 
 参数的完整说明在各文件开头的 docstring。

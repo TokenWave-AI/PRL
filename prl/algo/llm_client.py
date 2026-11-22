@@ -71,7 +71,7 @@ def config(prefix: str = JUDGE) -> dict[str, Any]:
 
 def probe(prefix: str = JUDGE) -> None:
     """Launcher check (no key in the output): the key file is readable, the API lists the model and its fallbacks,
-    and each answers one short request with the configured extra body (Bailian lists models a key may not call: 403)."""
+    and each answers one short request with the configured extra body (a provider may list models a key may not call: 403)."""
     import urllib.error
     import urllib.request
 

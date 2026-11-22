@@ -104,7 +104,7 @@ PRL_SITE=mysite TRANSFORM=atlas bash scripts/quickstart.sh
 | 从这一步开始让策略再跑 n 次 | `step.reroll(n=2, credit="subgroup")` | 新沙盒重放前几步，策略接着跑，测试打分；新轨迹也参与训练（可以多处，`credit` 见[进阶用法](#进阶用法)） |
 | ……并给这几次一句提示 | `step.reroll(n=2, credit="verified", hint="Re-read the task.")` | 在这一步之前把提示给策略看：属于 prompt，不训练 |
 
-被上下文总结切开的轨迹（`len(traj.samples) > 1`）不能分支：调 `reroll` 前先判断。
+被上下文总结切开的轨迹（`traj.split`）不能分支：调 `reroll` 前先判断。
 
 ### 辅助功能
 
@@ -262,7 +262,7 @@ PRL_TRANSFORM_CHECK_OUT=/tmp/check python -m prl.transforms.check
 - 录好的轨迹没有 rollout log prob（`surprisal` 看到的都是 0），也没有测试输出（`hint_reroll` 的判官看不到）：这类选择只在训练里看得出来。用自己的轨迹：`scripts/tools/make_transform_fixture.py` 从一次运行的 `traces/rollout_data/<update>.pt` 做 fixture，`PRL_TRANSFORM_FIXTURE=<它>` 就在它上面检查。
 - reroll 在这里只记录请求（`transform.json` 的 `reroll`：从哪些步分支、要重放哪些轮），分支在训练时才真正跑；训练时快速开始会自动选 reroll 需要的 arm。
 
-**③ 训练 + 评测**：`PRL_SITE=mysite TRANSFORM=my_transform bash scripts/quickstart.sh`。作业开头会先在录好的轨迹上试跑你的函数，函数报错、超时或全部跳过就不开训。
+**③ 训练 + 评测**：`PRL_SITE=mysite TRANSFORM=my_transform bash scripts/quickstart.sh`。它读你的文件判断要不要判官（`ask`、ATLAS 的 labeler）和 reroll arm（`.reroll(`）；判断错了就直接说：`PRL_NEEDS_JUDGE=0` 或 `1`，`ARM=ota_train_transform` 或 `ota_train_transform_reroll`。作业开头会先在录好的轨迹上试跑你的函数，函数报错、超时或全部跳过就不开训。
 
 ## 进阶用法
 

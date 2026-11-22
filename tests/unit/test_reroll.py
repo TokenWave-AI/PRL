@@ -322,6 +322,10 @@ def test_a_reroll_joins_the_group_with_its_own_reward(worker, monkeypatch, tmp_p
         assert leaf.metadata["prl_reroll_of"] == str(tmp_path)
     assert "branch_anchors" not in trial.train_metadata  # member credit: the trial keeps its group value
     assert json.loads((folder / "outcome.json").read_text())["status"] == "ok"
+    # the branch scored 1.0 against the trial's 0.0: recorded on the outcome and in the trial's transform.json
+    assert outcome["beat_trial"] is True and trial.metadata["prl_transform"]["reroll_beaten_steps"] == [2]
+    on_disk = json.loads((tmp_path / "transform.json").read_text())
+    assert on_disk["reroll"][0]["beat_trial"] is True and on_disk["reroll_beaten_steps"] == [2]
 
 
 def test_every_branch_runs_with_its_own_seed_and_subgroup_steps_mark_the_trial(worker, monkeypatch, tmp_path):

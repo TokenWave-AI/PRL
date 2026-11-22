@@ -56,9 +56,18 @@ async def _reroll(input: GenerateFnInput, result: GenerateFnOutput, pristine: An
         raise ValueError(f"a reroll trains with its own reward: needs --custom-reward-post-process-path {ADDED_REWARDS}")
     jobs =[(anchor, j) for anchor in request["anchors"] for j in range(int(anchor.get("n", 1)))]
     # Seeds apart from each other and from the trial's own: a fixed seed must not reproduce a sibling's continuation
-    done = await asyncio.gather(*(_branch(input, pristine, rollout_id, anchor, j, 3000017 * (k + 1))
+    trial_reward = samples[0].metadata.get("reward")
+    done = await asyncio.gather(*(_branch(input, pristine, rollout_id, anchor, j, 3000017 * (k + 1), trial_reward)
                                   for k, (anchor, j) in enumerate(jobs)))
     record["reroll"] = [outcome for outcome, _ in done]  # the request's text stays in each branch's request.json
+    # the steps a branch beat the trial from (with credit verified: the ones whose prefix is cleared)
+    record["reroll_beaten_steps"] = sorted({o["step"] for o, _ in done if o.get("beat_trial")})
+    trial_dir = request["anchors"][0].get("trial_dir")
+    if trial_dir:  # the record core wrote had the request only
+        try:
+            (Path(trial_dir) / "transform.json").write_text(json.dumps(record, default=str) + "\n")
+        except OSError:
+            logger.exception("[prl] reroll: could not update %s/transform.json", trial_dir)
     new: list[Any] = []
     for outcome, branch in done:
         for s in branch:
@@ -81,7 +90,7 @@ async def _reroll(input: GenerateFnInput, result: GenerateFnOutput, pristine: An
 
 
 async def _branch(input: GenerateFnInput, pristine: Any, rollout_id: int, anchor: dict[str, Any], j: int,
-                  seed_offset: int) -> tuple[dict[str, Any], list[Any]]:
+                  seed_offset: int, trial_reward: float | None = None) -> tuple[dict[str, Any], list[Any]]:
     """Branch ``j`` of ``anchor``: a fresh trial of the request that replays the turns before the step
     (prl/rollout/reroll_agent.py), then the policy; its outcome and its samples (none when it failed: the trial
     trains without it)."""
@@ -146,6 +155,8 @@ async def _branch(input: GenerateFnInput, pristine: Any, rollout_id: int, anchor
         outcome["reason"] = f"{type(exc).__name__}: {exc}"[:1000]
         new = []
     outcome["seconds"] = round(time.time() - t0, 2)
+    if outcome["status"] == "ok" and trial_reward is not None:
+        outcome["beat_trial"] = outcome["reward"] > float(trial_reward)  # verified credit: confirms the step
     if folder is not None:
         try:
             (folder / "outcome.json").write_text(json.dumps(outcome) + "\n")

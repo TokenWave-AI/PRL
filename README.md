@@ -104,7 +104,7 @@ This layer samples more: the policy continues from the step you pick in a fresh 
 | let the policy run n more times from this step | `step.reroll(n=2, credit="subgroup")` | replays the steps before it in new sandboxes, the policy continues, the tests grade; the new trajectories train too (several steps are allowed; `credit`: see [Going further](#going-further)) |
 | ... with a hint for those runs | `step.reroll(n=2, credit="verified", hint="Re-read the task.")` | shows the hint to the policy before the step: part of its prompt, never trained |
 
-Not for a trajectory the context summary split into parts (`len(traj.samples) > 1`): check it before you call `reroll`.
+Not for a trajectory the context summary split into parts (`traj.split`): check it before you call `reroll`.
 
 ### Helpers
 
@@ -262,7 +262,7 @@ A function that asks a model uses the judge of the site profile: `set -a; source
 - The recorded trajectories have no rollout log probs (`surprisal` sees all 0) and no test output (`hint_reroll`'s judge sees none): such choices show in training only. Your own trajectories: `scripts/tools/make_transform_fixture.py` makes a fixture from a run's `traces/rollout_data/<update>.pt`, `PRL_TRANSFORM_FIXTURE=<it>` checks on it.
 - A reroll is only recorded here (`reroll` in `transform.json`: the steps and the turns to replay); its branches run in training, where the quick start picks the arm a reroll needs by itself.
 
-**③ Train and evaluate it**: `PRL_SITE=mysite TRANSFORM=my_transform bash scripts/quickstart.sh`. The job first runs your function on the recorded trajectories and does not start training if it raises, times out or skips them all.
+**③ Train and evaluate it**: `PRL_SITE=mysite TRANSFORM=my_transform bash scripts/quickstart.sh`. It reads your file to tell whether it needs the judge (`ask`, ATLAS' labeler) and the reroll arm (`.reroll(`); when that guesses wrong, say it: `PRL_NEEDS_JUDGE=0` or `1`, `ARM=ota_train_transform` or `ota_train_transform_reroll`. The job first runs your function on the recorded trajectories and does not start training if it raises, times out or skips them all.
 
 ## Going further
 

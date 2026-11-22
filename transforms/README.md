@@ -78,8 +78,14 @@ reroll agent adds it to the policy's request, so the branch's Harbor `trajectory
 - A trajectory can branch at several steps (call `reroll` on each), at most 16 times each.
 - The original trajectory trains as usual (its masks and weights apply; a rewrite of the prefix goes into the replay
   only, the original stays as it was).
-- Limits: no branch at or after a rewritten step; not for trajectories split by the context summary; only one
-  transform of a chain may ask for branches.
+- Limits: no branch at or after a rewritten step; not for trajectories split by the context summary (`traj.split`:
+  check it first, a reroll on one raises); only one transform of a chain may ask for branches. Step 0 is allowed: its
+  branches replay nothing, each is one more trajectory from the start (the branch template's `min_step` and
+  `hint_reroll` leave it out).
+- What trains after a hint: the branch's tokens from the step on, in a context that holds the hint, which the policy
+  will not get at test time. How much of it carries over to runs without a hint is an open question; a hint that
+  gives the answer away carries least. `hint_reroll`'s `prompt="hint_v3"` is stricter than the default `hint_v2` (it
+  names only the part to look at, no detail inside it); the same transform with no hint is the control.
 - A run with branches needs the branch post-processing: the arm `ota_train_transform_reroll` (it adds
   `--custom-reward-post-process-path prl.algo.added_rewards.group_rewards`); the quick start picks it for a
   transform that calls `reroll`, and the check before a run stops a job without it.
@@ -87,7 +93,9 @@ reroll agent adds it to the policy's request, so the branch's Harbor `trajectory
   `reroll_replay.json`: for each replayed turn, whether its terminal output matched the original, with both sides
   when it did not); metrics `rollout/reroll/*` (`requested_trials`, `branches`, `{ok,failed,subgroup}_branches`,
   `verified_steps`, `confirmed_steps` (a branch scored more than its trial; `subgroup_branches` counts `credit="subgroup"` only), `reward_mean`, `source_reward_mean`, `seconds_mean`). A branch's own trial directory sits next to the others in
-  `harbor_trials/` (no `transform.json`; the branch's `outcome.json` names it).
+  `harbor_trials/` (no `transform.json`; the branch's `outcome.json` names it). Each outcome has `beat_trial` (its
+  reward above the trial's; with `verified`, what clears the trial's prefix), and the trial's `transform.json`,
+  rewritten after the branches ran, `reroll` (the outcomes) and `reroll_beaten_steps`.
 - The replayed terminal output is real and differs a little from the original (times, inodes, git hashes and the
   like); the framework records this and does not block it.
 
@@ -117,6 +125,10 @@ k = await ask(prompt, check=fn)     # prompt is a string or a list of messages
 | `traj.record["key"] = value` | saved to `<trial_dir>/transform.json` |
 | `traj.add_sample(sample, reward)`, `traj.demonstrate(step, action, reward)` | advanced: build extra training samples yourself |
 
+To look at the recorded trajectories in a REPL, as your function gets them:
+`from prl.transforms.check import load_trajectories; trajs = load_trajectories("tokenizer")` (the tokenizer directory
+of Quick start step 2), then e.g. `trajs[0].steps[1].command`, `trajs[0].steps[1].terminal`, `trajs[0].split`.
+
 ## 3. Branch template
 
 `TRANSFORM=branch`. Every method that rolls out again from the middle answers three questions; each question is a
@@ -135,7 +147,9 @@ at most this many steps, in the order select gives). The chosen steps are record
 ### select: where to branch
 
 `select(traj, **params) -> list of steps` (`Step`s or step numbers from 0, optionally with a score as
-`(step, score)`, best first). select may also edit the steps before (for the replay only).
+`(step, score)`, or `{"step": ..., "hint": "..."}` to give that step's branches a hint; best first). select may also
+edit the steps before (for the replay only). The template's `hint` param gives every branch one hint, unless select
+gave its own.
 
 | Built-in | Meaning |
 |---|---|
@@ -220,7 +234,7 @@ environment of the shell that submits it, apart from `TRANSFORM` and `PRL_TRANSF
 | `atlas_signed` | a judge marks steps good / bad / neutral; bad steps of successful trajectories are pushed the other way | `mode` (mild / strict), `bad_weight`, `failed_good_weight`, `quote_bad` (push only the span that went wrong) |
 | `rewrite` | a teacher makes small edits; or fixes failures only; or picks a step to branch from | `prompt`, `mask_new`, `successes` / `failures`, `added="reroll"`, limits on how much it may change |
 | `branch` | the branch template (§3) | `select`, `allocate`, `credit`, `min_step`, `max_anchors` |
-| `hint_reroll` | a judge names a failed trajectory's first wrong step (numbered from 1 in its record, as in its prompt) and writes a hint of at most `max_hint_words` (where to look again, no command); the policy tries again from there `n` times with it | `n` (2), `credit` (`verified`), `prompt` (`hint_v2`; `hint_v1` also names the mistake), `max_hint_words` (15), `test_chars` (the end of the trajectory's test output the judge sees; 1500) |
+| `hint_reroll` | a judge names a failed trajectory's first wrong step (numbered from 1 in its record, as in its prompt) and writes a hint of at most `max_hint_words` (where to look again, no command); the policy tries again from there `n` times with it | `n` (2), `credit` (`verified`), `prompt` (`hint_v2`; `hint_v3` stricter: only the part to look at; `hint_v1` also names the mistake), `max_hint_words` (15), `test_chars` (the end of the trajectory's test output the judge sees; 1500) |
 | `reroll_smoke` | for testing the framework: branches from a middle step | `min_steps`, `edit`, `every` |
 
 Each file's docstring describes all of its parameters.

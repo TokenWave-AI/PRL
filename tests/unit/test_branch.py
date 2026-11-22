@@ -125,3 +125,17 @@ def test_the_teacher_selection_and_a_users_own_plugins(run, monkeypatch):
     monkeypatch.setattr(branch, "_resolve", lambda name: mine[name])
     record, _ = run({"select": "last", "allocate": {"name": "twice_each", "k": 4}})
     assert [(a["step"], a["n"]) for a in record["reroll"]["anchors"]] == [(2, 4)]
+
+
+def test_hints_from_the_params_or_from_select(run, monkeypatch):
+    from transforms import branch
+
+    record, _ = run({"credit": "verified", "hint": "Re-read the task."})
+    [anchor] = record["reroll"]["anchors"]
+    assert (anchor["credit"], anchor["hint"]) == ("verified", "Re-read the task.")
+
+    def last_with_hint(traj):  # a user's select that writes a hint per step
+        return [{"step": len(traj.steps) - 1, "hint": "Check the output."}]
+    monkeypatch.setitem(branch.SELECT, "last_with_hint", last_with_hint)
+    record, _ = run({"select": "last_with_hint", "hint": "the default"})
+    assert record["reroll"]["anchors"][0]["hint"] == "Check the output."

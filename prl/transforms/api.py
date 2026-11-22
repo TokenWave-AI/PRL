@@ -227,6 +227,11 @@ class Trajectory:
     _extras: list[Any] = field(default_factory=list, repr=False)  # added to the trial's samples after _apply
     _reroll: dict[str, Any] | None = field(default=None, repr=False)  # set by _apply when steps are rerolled
 
+    @property
+    def split(self) -> bool:
+        """The context summary split this trial into several samples: it cannot be rewritten or rerolled."""
+        return len(self.samples) > 1
+
     def skip(self, reason: str) -> None:
         self.skipped = reason
 
