@@ -28,6 +28,8 @@ from copy import deepcopy
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from prl.transforms.api import SIBLING_CREDITS
+
 if TYPE_CHECKING:
     from miles.rollout.base_types import GenerateFnInput, GenerateFnOutput
 
@@ -40,7 +42,7 @@ _reroll_slots: dict[asyncio.AbstractEventLoop, asyncio.Semaphore] = {}
 
 async def _reroll(input: GenerateFnInput, result: GenerateFnOutput, pristine: Any, rollout_id: int) -> GenerateFnOutput:
     """The branches the transform asked for, if any (``anchors``: steps, ``n`` branches each): the trial's samples, plus
-    those of every branch that got a reward. A subgroup step with a branch gives the trial's samples
+    those of every branch that got a reward. A subgroup or verified step with a branch gives the trial's samples
     ``train_metadata["branch_anchors"]`` (where its advantage from that step on comes from, added_rewards)."""
     samples = result.samples if isinstance(result.samples, list) else [result.samples]
     record = next((s.metadata["prl_transform"] for s in samples
@@ -69,8 +71,8 @@ async def _reroll(input: GenerateFnInput, result: GenerateFnOutput, pristine: An
                                 "added_id": f"reroll:{outcome['step']}:{outcome['branch']}",
                                 "branch": {"anchor": outcome["step"], "credit": outcome["credit"]}}
         new += branch
-    anchors = [{"step": a["step"], "start": a["token_start"], "credit": "subgroup"} for a in request["anchors"]
-               if a.get("credit") == "subgroup"
+    anchors = [{"step": a["step"], "start": a["token_start"], "credit": a["credit"]} for a in request["anchors"]
+               if a.get("credit") in SIBLING_CREDITS
                and any(o["status"] == "ok" and o["step"] == a["step"] for o, _ in done)]
     if anchors:
         for s in samples:  # a rerolled trial is one sample (core refuses one split by a summary)

@@ -64,13 +64,15 @@ In a chain, a function gets the steps as the one before left them: `step.weight 
 
 ### Branches (implemented)
 
-`step.reroll(n=1, credit="member")`: after your function returns, the framework opens `n` new sandboxes (branches) for
-this step. Each runs the commands before this step for real, in order (the rewritten ones, if there are any), then
-the policy generates from this step on and the tests grade it. All branches run at once.
+`step.reroll(n=1, credit="member", hint=None)`: after your function returns, the framework opens `n` new sandboxes
+(branches) for this step. Each runs the commands before this step for real, in order (the rewritten ones, if there are
+any), then the policy generates from this step on and the tests grade it. All branches run at once. A `hint` is shown to
+the branches' policy at the end of the environment message before this step: part of its prompt, never trained.
 
 - A branch's part before this step is context only and does not train; the branch trains with its own reward, scored
   as `credit` says (see [credit](#credit-how-a-new-trajectory-is-scored) below): `member` counts it as one more member
-  of the group; `subgroup` compares it only with its siblings from the same start (GRPO only).
+  of the group; `subgroup` compares it only with its siblings from the same start (GRPO only); `verified` is
+  `subgroup`, with the original's prefix credited by what the branches found (GRPO only).
 - A trajectory can branch at several steps (call `reroll` on each), at most 16 times each.
 - The original trajectory trains as usual (its masks and weights apply; a rewrite of the prefix goes into the replay
   only, the original stays as it was).
@@ -82,7 +84,7 @@ the policy generates from this step on and the tests grade it. All branches run 
 - Results: one `reroll/s<step>_b<j>/` per branch in the trajectory's directory (the request, the outcome, and
   `reroll_replay.json`: for each replayed turn, whether its terminal output matched the original, with both sides
   when it did not); metrics `rollout/reroll/*` (`requested_trials`, `branches`, `{ok,failed,subgroup}_branches`,
-  `reward_mean`, `source_reward_mean`, `seconds_mean`). A branch's own trial directory sits next to the others in
+  `verified_steps`, `confirmed_steps` (a branch scored more than its trial), `reward_mean`, `source_reward_mean`, `seconds_mean`). A branch's own trial directory sits next to the others in
   `harbor_trials/` (no `transform.json`; the branch's `outcome.json` names it).
 - The replayed terminal output is real and differs a little from the original (times, inodes, git hashes and the
   like); the framework records this and does not block it.
@@ -164,6 +166,7 @@ Example: a group of 8, 2 of them successful. A failed trajectory τ branches at 
 |---|---|---|
 | `member` (default) | the branch is one more member of the group, normalized with everyone | the group mean goes from 0.25 to 0.33; all of τ's steps (the first 4 too) are still pushed down as a whole; the other 7 are pushed down a little too |
 | `subgroup` | the branch is compared only with those from the same start: τ from step 5 on, plus the other branches at that step. If the siblings all score the same, τ's advantage from that step on is 0 (it is compared only with the alternatives, no longer pushed by the whole outcome) | τ after step 5 is pushed down, the branch is pushed up; τ's first 4 steps keep their group advantage; the other 7 are not affected |
+| `verified` | when a branch scores more than τ (the state before the step could still succeed): as `subgroup`, and τ's steps before the step get advantage 0 (not blamed); when no branch does, τ keeps its group advantage throughout | τ's first 4 steps are no longer pushed down; after step 5 τ is pushed down and the branch up. If the branches fail too: τ is pushed down as in GRPO, the branches get advantage 0 |
 | `value` (later) | estimate the step's value as the mean score of every continuation from the same start, and weight the original trajectory's steps by it (the idea of VinePPO / FR3E) | — |
 
 Trade-offs: `member` is simple and verified, but a branch starts with a prefix it got for free and is not fully
@@ -180,6 +183,7 @@ from the critic).
 | FR3E | `entropy`, top-K | M per step | `value` |
 | ARPO | `post_tool_entropy` | Z when the entropy rises past a threshold | `subgroup` |
 | judge + branches | `first_bad` | `fixed`, n=2 | `subgroup`, with a negative weight on the original's bad steps too |
+| hint branches (`transforms/hint_reroll.py`) | the judge names the first wrong step and writes a hint of at most 15 words: where to look again, not what is wrong, no command | n=2, failed trials only | `verified`; the hint ends the message before the fork and does not train |
 
 ## 4. What the framework does for you
 

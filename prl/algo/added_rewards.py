@@ -18,6 +18,12 @@ trial keeps its group value; its tokens from the step on get the siblings' value
 anchor to the next. Siblings that all scored the same give 0 from the step on: the step is compared with its alternatives only, so
 the trial's own outcome no longer pushes those tokens. GRPO only (PPO's advantage is the critic's).
 
+Verified credit (``credit="verified"``; transforms/hint_reroll.py): the branches and the trial from the
+step on are siblings as with subgroup, but what the trial's tokens get depends on the outcome. When a branch scored more
+than the trial, the state at the step could still succeed: the trial's tokens before the step get 0 (not blamed), from
+the step on the siblings' value. When none did, nothing confirms the step as the mistake: the trial keeps its group value
+throughout, and the branches take their siblings' value (0 when they tied with the trial). GRPO only.
+
 PPO has no group: an added sample's reward goes in as it is, against the critic's values; the others as the length rule gives them.
 """
 
@@ -29,6 +35,8 @@ from collections import defaultdict
 from typing import Any
 
 import torch
+
+from prl.transforms.api import SIBLING_CREDITS
 
 logger = logging.getLogger(__name__)
 
@@ -64,7 +72,7 @@ def _normalized(rewards: list[float], args: Any, floor: float) -> list[float]:
 def group_rewards(args: Any, samples: list[Any]) -> tuple[list[float], list[float]]:
     raw = [s.get_reward_value(args) for s in samples]
     shaped = _shaped(raw, samples)
-    subgroup = [((s.train_metadata or {}).get("branch") or {}).get("credit") == "subgroup" for s in samples]
+    subgroup = [((s.train_metadata or {}).get("branch") or {}).get("credit") in SIBLING_CREDITS for s in samples]
     if args.advantage_estimator == "ppo":
         if any(subgroup):
             raise ValueError("subgroup credit (step.reroll) is for GRPO: under PPO the critic gives the advantage")
@@ -75,6 +83,7 @@ def group_rewards(args: Any, samples: list[Any]) -> tuple[list[float], list[floa
     # (group, rollout, step) -> member -> (reward, rows); the trial itself is member "trial"
     siblings: dict[tuple[int, Any, int], dict[Any, tuple[float, list[int]]]] = {}
     starts: dict[tuple[int, Any, int], int] = {}
+    credits: dict[tuple[int, Any, int], str] = {}
     for i, s in enumerate(samples):
         if s.group_index is None or s.rollout_id is None:
             raise ValueError(f"sample {i} needs a group_index and a rollout_id")
@@ -91,6 +100,7 @@ def group_rewards(args: Any, samples: list[Any]) -> tuple[list[float], list[floa
                 at = (int(s.group_index), s.rollout_id, int(anchor["step"]))
                 siblings.setdefault(at, {}).setdefault("trial", (reward, []))[1].append(i)
                 starts[at] = int(anchor["start"])
+                credits[at] = anchor.get("credit", "subgroup")
         member = table.setdefault(key, (reward, []))
         if member[0] != reward:
             raise ValueError(f"all samples of rollout {key!r} must share one reward: {member[0]}, {reward}")
@@ -106,13 +116,21 @@ def group_rewards(args: Any, samples: list[Any]) -> tuple[list[float], list[floa
         if "trial" not in members or len(members) < 2:
             # A branch whose trial is not in the batch, or a step without a branch left: nothing to compare with
             raise ValueError(f"subgroup at {at}: needs the trial and at least one branch, got {sorted(map(str, members))}")
+        verified = credits[at] == "verified"
+        confirmed = any(name != "trial" and m[0] > members["trial"][0] for name, m in members.items())
         for (name, (_, rows)), value in zip(members.items(), _normalized([m[0] for m in members.values()], args, floor),
                                             strict=True):
             for i in rows:
-                if name == "trial":
-                    spans.setdefault(i, []).append((starts[at], value))
-                else:
+                if name != "trial":
                     out[i] = value
+                elif not verified:
+                    spans.setdefault(i, []).append((starts[at], value))
+                elif confirmed:  # the steps before this one are not blamed: 0 from the response's start
+                    marks = spans.setdefault(i, [])
+                    marks.append((starts[at], value))
+                    if not any(a == 0 for a, _ in marks):
+                        marks.append((0, 0.0))
+                # verified, not confirmed: the trial keeps its group value
     for i, marks in spans.items():
         marks.sort()
         end = [m[0] for m in marks[1:]] + [samples[i].response_length]

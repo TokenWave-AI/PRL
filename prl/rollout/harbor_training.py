@@ -13,7 +13,7 @@ not raise in harbor_agent, but a training trial they end before the verifier ran
 like an infrastructure failure: resampled, not scored 0 (also a shell the model closed). Evaluation scores such a
 trial 0, and by default any trial that failed, as Harbor and TB-dev's own scoring do. With PRL_EVAL_SANDBOX_RETRIES
 a failure of the sandbox service (SANDBOX_FAILURES: a rate limit, an internal error of the service, a command whose end
-event was lost) is run again instead: it says nothing about the policy, and as 0 it makes a score depend on the
+event was lost, a request to the service that timed out or lost its connection) is run again instead: it says nothing about the policy, and as 0 it makes a score depend on the
 account's sandbox quota. An aborted training trial is first run again on its own, in a fresh session (PRL_ABORT_MAX_RETRIES); only
 when every attempt aborts does the aborted sample reach Miles, whose pre-put filter (check_no_aborted) then discards
 the whole prompt group; one new prompt replaces it (rollout/refill.py). Refilling cost a full extra trial wave at the
@@ -60,7 +60,9 @@ logger = logging.getLogger(__name__)
 
 # Failures of the sandbox service, not of the policy or the task: the exception type or text Harbor reports
 # (prl/rollout/harbor_agent.py raises with both). scripts/tools/tbdev_score.py keeps the same list.
-SANDBOX_FAILURES = ("RateLimitException", "SandboxException", "Command ended without an end event")
+SANDBOX_FAILURES = ("RateLimitException", "SandboxException", "Command ended without an end event",
+                    # requests to the sandbox service that timed out or lost their connection (the e2b SDK's errors)
+                    "ReadTimeout", "RemoteProtocolError", "TimeoutException")
 # What made the attempt in flight abort, set by run() for _retry_aborted (the agent function runs inside the attempt's
 # await, so it sees the attempt's dict; the aborted sample Miles returns carries no trace of the agent's exception)
 _failure: contextvars.ContextVar[dict[str, Any] | None] = contextvars.ContextVar("failure", default=None)

@@ -24,6 +24,11 @@ has its own host name and tmux pads the screen with blank lines, which alone mad
 smoke run. What still differs is the environment itself (file times, inodes, commit hashes) or a command that really
 behaved otherwise. Until the policy's first call, the context count Terminus-2 uses to decide on a summary
 (prl/rollout/harbor_fixes.py (3)) is the trial's own (``context_tokens``).
+
+A request with a ``hint`` (``step.reroll(hint=...)``, e.g. transforms/hint_reroll.py) appends it, after a blank line, to
+the message the policy gets first (after the replayed turns' comparison): that message is part of the policy's prompt,
+so the hint is never trained, and Terminus-2 keeps it in the history of every later turn (the session's token prefix
+stays the one the policy saw). ``reroll_replay.json`` then also has ``hint_chars``.
 """
 
 from __future__ import annotations
@@ -57,6 +62,7 @@ class RerollTerminus2(TrainingTerminus2):
         self._instruction = request["instruction"]
         self._turns = list(request["turns"])
         self._context_tokens = int(request.get("context_tokens") or 0)
+        self._hint = request.get("hint") or None
         self._replayed = 0
         self._compared = {"turns": len(self._turns), "same": 0, "differ": [], "differ_detail": [],
                           "first_message_same": None}
@@ -68,6 +74,9 @@ class RerollTerminus2(TrainingTerminus2):
         elif self._replayed <= len(self._turns):
             self._compare(prompt)
         if self._replayed >= len(self._turns):
+            if self._replayed == len(self._turns) and self._hint:  # the policy's first call
+                prompt = f"{prompt.rstrip()}\n\n{self._hint}"
+                self._compared["hint_chars"] = len(self._hint)
             self._replayed += 1
             self._save()
             return await super()._chat_with_retries(chat, prompt)

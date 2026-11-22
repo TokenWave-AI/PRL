@@ -22,15 +22,19 @@ parts. The function may
     A changed reward is normalized with the rest of the prompt's group (GRPO): turning a group's failures into
     successes can leave the group without signal. Not for trials split by a summary (several leaves); the last turn
     cannot be deleted;
-  - ``step.reroll(n=1, credit="member")``: the policy generates again from this turn on, ``n`` times (branches;
+  - ``step.reroll(n=1, credit="member", hint=None)``: the policy generates again from this turn on, ``n`` times (branches;
     ``Trajectory._reroll_request``). After the chain, for each branch a fresh sandbox of the task runs the turns before
     it, as they now stand (a rewrite of them reaches the branches only: the trial itself trains as generated, with its
     masks and weights), and the policy continues in a new session (prl/rollout/harbor_training.py,
     prl/rollout/reroll_agent.py). A branch's turns before ``step`` are context; it trains with its own verifier
     reward (prl/algo/added_rewards.py), as ``credit`` says: ``member``, one more member of the prompt's group;
     ``subgroup``, against its siblings only (the other branches of this step and the trial from this step on, whose
-    tokens from here on then take that advantage; GRPO only). Several steps of one trial may branch (one transform of
-    the chain asks for all of them); not at or after a rewritten turn, not for trials split by a summary;
+    tokens from here on then take that advantage; GRPO only); ``verified``, as ``subgroup`` when a branch scored more
+    than the trial (the trial's tokens before the step then get advantage 0: the state at the step could still
+    succeed), else the trial keeps its group value throughout (GRPO only). ``hint``: text the branches' policy sees at
+    the end of the message before the step (prl/rollout/reroll_agent.py): part of its prompt, never trained.
+    Several steps of one trial may branch (one transform of the chain asks for all of them); not at or after a
+    rewritten turn, not for trials split by a summary;
   - ``traj.skip(reason)``: leave the trial as it is;
   - ``await ask(prompt, check)``: the run's model (see ``ask``); every call is saved with the trial, and no acceptable
     answer leaves the trial as it is (skipped). A function changes nothing unless it returns normally, so a
@@ -55,7 +59,10 @@ from prl.transforms.tokens import THINK_END, TURN_END, USER_START, _moved, _runs
 MAX_BRANCHES = 16
 
 
-CREDITS = ("member", "subgroup")  # how a branch trains (prl/algo/added_rewards.py)
+CREDITS = ("member", "subgroup", "verified")  # how a branch trains (prl/algo/added_rewards.py)
+SIBLING_CREDITS = ("subgroup", "verified")  # a branch compared with its siblings only, not a group member
+# A hint is a short note to the policy (the transform keeps it short); this only bounds what reaches its context
+MAX_HINT_CHARS = 2000
 
 
 UNREBUILT = ("rollout_sampling_mask", "teacher_log_probs", "opd_reverse_kl", "rollout_routed_experts",
@@ -79,6 +86,7 @@ class Step:
     deleted: bool = False
     rerolls: int = 0  # branches asked for from this step (reroll)
     credit: str = "member"  # how they train (reroll)
+    hint: str | None = None  # what the branches' policy sees before this step (reroll)
     _sample: int = field(default=0, repr=False)  # samples[_sample].loss_mask[_start:_end] (response-relative)
     _start: int = field(default=0, repr=False)
     _end: int = field(default=0, repr=False)
@@ -109,14 +117,18 @@ class Step:
         """Remove this turn and the environment message after it."""
         self.deleted = True
 
-    def reroll(self, n: int = 1, credit: str = "member") -> None:
+    def reroll(self, n: int = 1, credit: str = "member", hint: str | None = None) -> None:
         """The policy generates again from this turn on, ``n`` times, after the turns before it as they now stand;
-        ``credit``: ``member`` or ``subgroup`` (module docstring). A second call on the step replaces the first."""
+        ``credit``: ``member``, ``subgroup`` or ``verified``; ``hint``: shown to the branches' policy before this turn,
+        never trained (module docstring). A second call on the step replaces the first."""
         if isinstance(n, bool) or not isinstance(n, int) or not 1 <= n <= MAX_BRANCHES:
             raise ValueError(f"step {self.index}: reroll n must be an integer in 1..{MAX_BRANCHES}, got {n!r}")
         if credit not in CREDITS:
             raise ValueError(f"step {self.index}: reroll credit must be one of {CREDITS}, got {credit!r}")
-        self.rerolls, self.credit = n, credit
+        if hint is not None and not (isinstance(hint, str) and hint.strip() and len(hint) <= MAX_HINT_CHARS):
+            raise ValueError(f"step {self.index}: a reroll hint is a non-empty text of at most {MAX_HINT_CHARS} "
+                             f"characters, got {hint!r:.100}")
+        self.rerolls, self.credit, self.hint = n, credit, hint
 
     @property
     def rerolled(self) -> bool:
@@ -183,7 +195,7 @@ class Step:
 
     def _state(self) -> tuple[Any, ...]:
         return (self.weight, self.masked, self.deleted, self.action, self.observation, tuple(self._spans),
-                self.rerolls, self.credit)
+                self.rerolls, self.credit, self.hint)
 
     def _rewritten(self) -> bool:
         return self.deleted or (self.action, self.observation) != self._original
@@ -357,7 +369,7 @@ class Trajectory:
                 raise ValueError(f"steps {late}: rewritten at or after the rerolled step {at.index}; the policy writes "
                                  "those")
             anchors.append({
-                "step": at.index, "n": at.rerolls, "credit": at.credit, "instruction": instruction,
+                "step": at.index, "n": at.rerolls, "credit": at.credit, "hint": at.hint, "instruction": instruction,
                 "turns": [t for t in turns if t["step"] < at.index], "trial_dir": self.trial_dir,
                 # The trial's tokens through the last replayed reply: the agent's context count until the server gives one
                 "context_tokens": prompt + (self.steps[at.index - 1]._end if at.index else 0),

@@ -136,3 +136,44 @@ def test_subgroup_needs_grpo_and_its_trial():
         group_rewards(SimpleNamespace(advantage_estimator="ppo"), [_sample(0, 0, 0.0), _branch(0, 0, 2, 0, 1.0)])
     with pytest.raises(ValueError, match="needs the trial"):
         group_rewards(ARGS, [_sample(0, 0, 0.0), _branch(0, 0, 2, 0, 1.0)])
+
+
+# --- verified credit (step.reroll(credit="verified"), transforms/hint_reroll.py) --------------------------------------
+
+def _verified(group, rollout, reward, anchors, length=12):
+    s = _marked(group, rollout, reward, anchors, length)
+    for anchor in s.train_metadata["branch_anchors"]:
+        anchor["credit"] = "verified"
+    return s
+
+
+def test_a_confirmed_step_clears_the_trials_prefix_and_compares_its_tail():
+    """2 of 8 pass; trial 3 fails, one of two branches from its step 5 (token 7) passes: the steps before it are not
+    blamed, from it on the trial is compared with its branches, and the group is as without the branches."""
+    group = [_sample(0, r, 1.0 if r < 2 else 0.0) for r in range(8)]
+    group[3] = _verified(0, 3, 0.0, [(5, 7)])
+    samples = [*group, _branch(0, 3, 5, 0, 1.0, credit="verified"), _branch(0, 3, 5, 1, 0.0, credit="verified")]
+    _, out = group_rewards(ARGS, samples)
+    alone = group_rewards(ARGS, [_sample(0, r, 1.0 if r < 2 else 0.0) for r in range(8)])[1]
+    assert out[:8] == pytest.approx(alone)
+    assert out[8] > 0 > out[9]  # the passing branch up, the failing one down
+    spans = group[3].train_metadata["advantage_spans"]
+    assert [s[:2] for s in spans] == [[0, 7], [7, 12]] and spans[0][2] == 0.0
+    assert spans[1][2] == pytest.approx(out[9])  # the trial's tail failed like the second branch
+
+
+def test_an_unconfirmed_step_leaves_the_trial_its_group_value():
+    group = [_sample(0, r, 1.0 if r < 2 else 0.0) for r in range(8)]
+    group[3] = _verified(0, 3, 0.0, [(5, 7)])
+    samples = [*group, _branch(0, 3, 5, 0, 0.0, credit="verified"), _branch(0, 3, 5, 1, 0.0, credit="verified")]
+    _, out = group_rewards(ARGS, samples)
+    alone = group_rewards(ARGS, [_sample(0, r, 1.0 if r < 2 else 0.0) for r in range(8)])[1]
+    assert out[:8] == pytest.approx(alone) and out[3] < 0  # pushed down as in GRPO, from start to end
+    assert "advantage_spans" not in group[3].train_metadata
+    assert out[8] == out[9] == 0.0  # tied with the trial: no signal
+
+
+def test_verified_needs_grpo():
+    with pytest.raises(ValueError, match="GRPO"):
+        group_rewards(SimpleNamespace(advantage_estimator="ppo"),
+                      [_sample(0, 0, 0.0), _branch(0, 0, 2, 0, 1.0, credit="verified")])

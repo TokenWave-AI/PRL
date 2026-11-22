@@ -132,6 +132,11 @@ def test_evaluation_scores_a_sandbox_failure_zero_by_default(setup, monkeypatch)
     ("Harbor RateLimitException: 429: Rate limit exceeded - account resource quota exhausted; inspect trial x", True),
     ("Harbor SandboxException: Code.INTERNAL: fork/exec /bin/bash: invalid argument; inspect trial x", True),
     ("Harbor Exception: Command ended without an end event; inspect trial x", True),
+    ("Harbor ReadTimeout: timed out; inspect trial x", True),  # the e2b SDK's requests to the service
+    ("Harbor RemoteProtocolError: Request failed: error sending request for url; inspect trial x", True),
+    ("Harbor TimeoutException: Request timed out: the stream didn't open within 'request_timeout'; inspect trial x",
+     True),
+    ("Harbor AgentTimeoutError: Agent execution timed out after 900.0 seconds; inspect trial x", False),
     ("Harbor RuntimeError: failed to send non-blocking keys: command=\"tmux send-keys\"; inspect trial x", False),
     ("Harbor RewardFileNotFoundError: No reward file found; inspect trial x", False),
 ])

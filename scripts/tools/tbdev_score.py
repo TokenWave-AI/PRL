@@ -5,7 +5,10 @@ the agent hit its turn limit and the tests were still graded), else 0; --strict 
 --samples N (the eval's EVAL_N_SAMPLES): with PRL_EVAL_SANDBOX_RETRIES (prl/rollout/harbor_training.py) an
 evaluation runs a trial again when it failed on the sandbox service, which leaves the failed attempt's trial dir beside
 the new one; a task with more than N trials drops such failed attempts, the earliest first, down to N.
-    python3 scripts/tools/tbdev_score.py [--strict] [--samples 8] <harbor_trials dir>...
+--drop-sandbox-failures: every trial the sandbox service failed is left out and the score is the mean over tasks of each
+task's mean, as an evaluation that ran them again would score in expectation; the way to compare an evaluation from
+before PRL_EVAL_SANDBOX_RETRIES with a later one.
+    python3 scripts/tools/tbdev_score.py [--strict] [--samples 8 | --drop-sandbox-failures] <harbor_trials dir>...
 """
 
 import argparse
@@ -15,11 +18,13 @@ import json
 from pathlib import Path
 
 # as SANDBOX_FAILURES in prl/rollout/harbor_training.py (tests/unit/test_tbdev_score.py checks they agree)
-SANDBOX_FAILURES = ("RateLimitException", "SandboxException", "Command ended without an end event")
+SANDBOX_FAILURES = ("RateLimitException", "SandboxException", "Command ended without an end event",
+                    "ReadTimeout", "RemoteProtocolError", "TimeoutException")
 
 ap = argparse.ArgumentParser()
 ap.add_argument("--strict", action="store_true")
 ap.add_argument("--samples", type=int, default=0)
+ap.add_argument("--drop-sandbox-failures", action="store_true")
 ap.add_argument("dirs", nargs="+")
 args = ap.parse_args()
 per, exc = collections.defaultdict(list), collections.Counter()
@@ -43,8 +48,17 @@ if args.samples:
         while len(trials) > args.samples and any(t[2] for t in trials):
             trials.remove(next(t for t in trials if t[2]))
             dropped += 1
+if args.drop_sandbox_failures:
+    for task in list(per):
+        dropped += sum(t[2] for t in per[task])
+        per[task] = [t for t in per[task] if not t[2]]
+        if not per[task]:
+            del per[task]  # every trial of it failed on the sandbox service: nothing to score
 for trials in per.values():
     exc.update(t[3] for t in trials if t[3])
 n, total = sum(map(len, per.values())), sum(t[1] for trials in per.values() for t in trials)
-print(f"tasks={len(per)} trials={n} mean={total / n:.4f} trials_per_task={dict(collections.Counter(map(len, per.values())))} "
-      f"exceptions={dict(exc)}" + (f" dropped_sandbox_failures={dropped}" if args.samples else ""))
+mean = (sum(sum(t[1] for t in trials) / len(trials) for trials in per.values()) / len(per)
+        if args.drop_sandbox_failures else total / n)
+print(f"tasks={len(per)} trials={n} mean={mean:.4f} trials_per_task={dict(collections.Counter(map(len, per.values())))} "
+      f"exceptions={dict(exc)}" + (f" dropped_sandbox_failures={dropped}"
+                                   if args.samples or args.drop_sandbox_failures else ""))

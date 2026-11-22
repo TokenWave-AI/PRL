@@ -127,26 +127,31 @@ def test_transform_acceptance(tmp_path: Path, monkeypatch, case: str) -> None:
 
 
 @pytest.mark.parametrize("case", ["ok", "reroll_missing", "wrong_group_reward", "tokens_differ", "none_ok",
-                                  "subgroup_unmarked", "wrong_added_id"])
+                                  "subgroup_unmarked", "wrong_added_id", "verified", "verified_unmarked",
+                                  "hint_not_shown"])
 def test_reroll_acceptance(tmp_path: Path, monkeypatch, case: str) -> None:
     acc = load_acceptance()
     a, b = tmp_path / "a", tmp_path / "b"
     (a / "reroll" / "s2_b0").mkdir(parents=True)
     b.mkdir()
-    (a / "reroll" / "s2_b0" / "request.json").write_text(json.dumps({"turns": [{}, {}]}))
+    credit = "verified" if case.startswith(("verified", "hint")) else "subgroup"
+    hint = {"hint": "Hint: x."} if credit == "verified" else {}
+    (a / "reroll" / "s2_b0" / "request.json").write_text(json.dumps({"turns": [{}, {}], **hint}))
     (tmp_path / "transform_check").mkdir()
     (tmp_path / "transform_check" / "summary.json").write_text(json.dumps({"transform": "reroll_smoke", "trials": [{}]}))
-    outcome = {"step": 2, "branch": 0, "credit": "subgroup", "status": "ok", "reward": 1.0, "trained_tokens": 4,
+    outcome = {"step": 2, "branch": 0, "credit": credit, "status": "ok", "reward": 1.0, "trained_tokens": 4,
                "replay": {"turns": 2, "same": 1, "differ": [1], "first_message_same": True}}
+    if case == "verified":
+        outcome["replay"]["hint_chars"] = len("Hint: x.")
     trial = _leaf(str(a), 9, after=9, chain=("reroll_smoke",))
     trial["metadata"]["prl_transform"]["reroll"] = [outcome]
-    if case != "subgroup_unmarked":
-        trial["train_metadata"]["branch_anchors"] = [{"step": 2, "start": 5, "credit": "subgroup"}]
+    if not case.endswith("unmarked"):
+        trial["train_metadata"]["branch_anchors"] = [{"step": 2, "start": 5, "credit": credit}]
     trial["reward"] = 0.0
     failed = _leaf(str(b), 9, after=9, chain=("reroll_smoke",))
     failed["metadata"]["prl_transform"]["reroll"] = [{"step": 1, "branch": 0, "credit": "member",
                                                             "status": "failed", "reason": "no verifier reward"}]
-    marks = {"group_reward": 1.0, "added_id": "reroll:2:0", "branch": {"anchor": 2, "credit": "subgroup"}}
+    marks = {"group_reward": 1.0, "added_id": "reroll:2:0", "branch": {"anchor": 2, "credit": credit}}
     leaf = {"loss_mask": [1, 1, 0], "reward": 0.0, "train_metadata": marks,
             "metadata": {"trial_dir": "/trials/r", "prl_reroll": outcome, "prl_reroll_of": str(a)}}
     batch = [trial, failed, leaf, dict(leaf)]  # the branch in two leaves, 2 + 2 trained tokens
@@ -161,7 +166,11 @@ def test_reroll_acceptance(tmp_path: Path, monkeypatch, case: str) -> None:
     elif case == "none_ok":
         batch = [failed]
     monkeypatch.setattr(acc, "load_samples", lambda run, n: batch)
-    if case == "ok":
+    if case == "verified":
+        out = acc.check_transform(tmp_path, (0,), "reroll_smoke")
+        assert (out["reroll_verified_branches"], out["reroll_hinted_branches"], out["reroll_subgroup_branches"]) == (
+            1, 1, 0)
+    elif case == "ok":
         out = acc.check_transform(tmp_path, (0,), "reroll_smoke")
         assert (out["reroll_requested_trials"], out["reroll_branches"], out["reroll_ok_branches"],
                 out["reroll_subgroup_branches"], out["reroll_rewards"]) == (2, 2, 1, 1, [1.0])

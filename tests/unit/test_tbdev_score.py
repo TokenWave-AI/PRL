@@ -45,6 +45,19 @@ def test_retried_sandbox_failures_drop_out_with_samples(tmp_path: Path) -> None:
     assert "mean=0.5000" in kept
 
 
+def test_dropping_sandbox_failures_scores_the_mean_of_task_means(tmp_path: Path) -> None:
+    lost = ("ReadTimeout", "timed out")  # a request to the sandbox service (e2b SDK)
+    _trial(tmp_path, "a", 0, None, lost)
+    _trial(tmp_path, "a", 1, 1.0)
+    _trial(tmp_path, "b", 0, 0.0)
+    _trial(tmp_path, "b", 1, 1.0)
+    _trial(tmp_path, "c", 0, None, ("RuntimeError", "failed to send non-blocking keys"))  # scores 0, stays
+    _trial(tmp_path, "c", 1, 1.0)
+    out = _score("--drop-sandbox-failures", str(tmp_path))
+    assert "trials=5 " in out and "dropped_sandbox_failures=1" in out
+    assert "mean=0.6667" in out  # (1 + 0.5 + 0.5) / 3; the mean over the 5 trials would be 0.6
+
+
 def test_the_scorer_knows_the_same_sandbox_failures() -> None:
     tree = ast.parse(TOOL.read_text())
     value = next(node.value for node in tree.body if isinstance(node, ast.Assign)

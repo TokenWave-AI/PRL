@@ -60,11 +60,13 @@ keystrokes 以 `\n` 结尾才执行，`C-c` 这类是按键，空的表示等待
 
 ### 分支（已实现）
 
-`step.reroll(n=1, credit="member")`：函数返回后，框架为这一步开 `n` 个新沙盒（分支），每个都把这一步之前的命令按顺序真实执行
-一遍（前面有改写的话用改写后的命令），然后策略从这一步接着生成，测试打分。所有分支同时跑。
+`step.reroll(n=1, credit="member", hint=None)`：函数返回后，框架为这一步开 `n` 个新沙盒（分支），每个都把这一步之前的命令按顺序真实执行
+一遍（前面有改写的话用改写后的命令），然后策略从这一步接着生成，测试打分。所有分支同时跑。给了 `hint` 时，它接在这一步之前那条
+环境消息的末尾给分支里的策略看：属于 prompt，不训练。
 
 - 分支在这一步之前的部分只做上下文、不训练；它用自己的分数训练，怎么算由 `credit` 决定（见下面的 [credit](#credit新轨迹怎么算分)）：
-  `member` 当作组里多一个成员；`subgroup` 只和同一起点的兄弟比（只支持 GRPO）。
+  `member` 当作组里多一个成员；`subgroup` 只和同一起点的兄弟比（只支持 GRPO）；`verified` 在 subgroup 的基础上看分支结果定原轨迹前缀
+  的 credit（只支持 GRPO）。
 - 一条轨迹可以有多处分支（对几个步骤分别调 `reroll`），每处最多 16 次。
 - 原轨迹照常训练（它的 mask 和权重照常生效；前缀的改写只进重放，原轨迹保持原样）。
 - 限制：不能在被改写的步骤上或之后分支；被上下文总结切开的轨迹不行；一个串联里只能有一个 transform 要求分支。
@@ -72,7 +74,7 @@ keystrokes 以 `\n` 结尾才执行，`C-c` 这类是按键，空的表示等待
   `--custom-reward-post-process-path prl.algo.added_rewards.group_rewards`）；快速开始遇到调用 `reroll` 的 transform 会自动选它，
   训练前的检查也会拦下没用它的作业。
 - 结果：轨迹目录下每个分支一个 `reroll/s<步>_b<序号>/`（请求、结果、`reroll_replay.json`：重放的每一轮终端输出和原来是否一致，
-  不一致的把两边的内容也记下来）；指标 `rollout/reroll/*`（`requested_trials`、`branches`、`{ok,failed,subgroup}_branches`、
+  不一致的把两边的内容也记下来）；指标 `rollout/reroll/*`（`requested_trials`、`branches`、`{ok,failed,subgroup}_branches`、`verified_steps`、`confirmed_steps`（有分支比原轨迹分高）、
   `reward_mean`、`source_reward_mean`、`seconds_mean`）。分支自己的 trial 目录和其它 trial 并列在 `harbor_trials/` 下
   （没有 `transform.json`；分支的 `outcome.json` 里写着它）。
 - 重放的终端输出是真实的，和原轨迹会有少量差别（时间、inode、git hash 这类）；框架记录、不拦截。
@@ -145,6 +147,7 @@ TRANSFORM=branch PRL_TRANSFORM_ARGS='{"select": "first_bad", "allocate": {"name"
 |---|---|---|
 | `member`（默认） | 分支当作组里多一个成员，和所有人一起归一化 | 组均值 0.25 → 0.33；τ 的所有步（包括前 4 步）照样被整体压低；其他 7 条也被压低一点 |
 | `subgroup` | 分支只和"同一起点出发的"比：τ 从第 5 步起的部分 + 同一处的其他分支。兄弟分数全一样时，τ 从这一步起的 advantage 是 0（只和替代走法比，不再按整条结局推） | τ 的第 5 步之后被压低，分支被推高；τ 的前 4 步保持原来的组 advantage；其他 7 条不受影响 |
+| `verified` | 有分支比 τ 分高（证实这一步之前的状态还能救）时同 `subgroup`，并且 τ 这一步之前的 advantage 记 0（不背锅）；没有分支比 τ 高时 τ 整条照组 advantage | τ 的前 4 步不再被压低；第 5 步之后被压低，分支被推高。要是分支也失败：τ 照 GRPO 整体压低，分支 advantage 0 |
 | `value`（之后） | 用同一起点所有续写的平均分估计这一步的价值，给原轨迹的步骤加权（VinePPO / FR3E 的思路） | — |
 
 取舍：`member` 简单、已验证，但分支有"前缀白送"的起点，和从头跑的轨迹不完全可比；`subgroup` 比的是"同一状态、不同走法"，
@@ -159,6 +162,7 @@ TRANSFORM=branch PRL_TRANSFORM_ARGS='{"select": "first_bad", "allocate": {"name"
 | FR3E | `entropy`, top-K | 每处 M 次 | `value` |
 | ARPO | `post_tool_entropy` | 熵升过阈值时 Z 次 | `subgroup` |
 | 判官 + 分支 | `first_bad` | `fixed`, n=2 | `subgroup`，原轨迹的坏步骤同时打负权重 |
+| 提示分支（`transforms/hint_reroll.py`） | 判官找第一个走错的步骤，写一句不超过 15 词的提示：只说回头看哪里，不说错在哪、不给命令 | n=2，只给失败的 | `verified`，提示接在分叉点之前的消息末尾，不训练 |
 
 ## 4. 框架替你做的事
 

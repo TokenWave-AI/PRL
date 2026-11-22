@@ -229,7 +229,8 @@ def check_rerolls(trials: dict[tuple[int, str], dict], rerolls: list[tuple[int, 
     """Each branch sample belongs to a trial of its batch whose record lists that branch (step, branch) as successful;
     it carries that outcome, the trial's reward, its own reward (group_reward) and one added_id per branch; its trained
     tokens, summed over its samples, are the outcome's; the replay compared every replayed turn. Every successful branch
-    reached the batch. A trial with a subgroup branch carries the step in branch_anchors."""
+    reached the batch. A trial with a subgroup or verified branch carries the step in branch_anchors; a branch with a
+    hint (step.reroll(hint=...)) showed the policy all of it (reroll_replay.json hint_chars)."""
     requested = [(key, o) for key, t in trials.items() for o in (t["record"].get("reroll") or [])
                  if isinstance(o, dict)]
     if not requested and not rerolls:
@@ -244,21 +245,26 @@ def check_rerolls(trials: dict[tuple[int, str], dict], rerolls: list[tuple[int, 
         assert tm.get("group_reward") == mine["reward"], (key, tm)
         assert tm.get("added_id") == f"reroll:{mine['step']}:{mine['branch']}", (key, tm)
         assert tm.get("branch") == {"anchor": mine["step"], "credit": mine["credit"]}, (key, tm)
-        if mine["credit"] == "subgroup":
+        if mine["credit"] in ("subgroup", "verified"):
             assert mine["step"] in [a["step"] for a in trials[key]["anchors"]], (key, trials[key]["anchors"])
         assert trials[key]["reward"] is None or sample.get("reward") == trials[key]["reward"], key
         branch = (*key, mine["step"], mine["branch"])
         trained[branch] = trained.get(branch, 0) + sum(sample["loss_mask"])
     ok = [(key, o) for key, o in requested if o["status"] == "ok"]
+    hinted = 0
     for key, outcome in ok:
         assert trained.get((*key, outcome["step"], outcome["branch"])) == outcome["trained_tokens"], (key, outcome)
         folder = Path(key[1]) / "reroll" / f"s{outcome['step']}_b{outcome['branch']}"
         request = json.loads((folder / "request.json").read_text())
         replay = outcome["replay"]
         assert replay and replay["turns"] == len(request["turns"]) == replay["same"] + len(replay["differ"]), outcome
+        if request.get("hint"):
+            assert replay.get("hint_chars") == len(request["hint"]), (outcome, request["hint"])
+            hinted += 1
     failed = [o.get("reason", "") for _, o in requested if o["status"] == "failed"]
     return {"reroll_requested_trials": len({key for key, _ in requested}), "reroll_branches": len(requested),
             "reroll_ok_branches": len(ok), "reroll_subgroup_branches": sum(o["credit"] == "subgroup" for _, o in ok),
+            "reroll_verified_branches": sum(o["credit"] == "verified" for _, o in ok), "reroll_hinted_branches": hinted,
             "reroll_failed": failed[:5], "reroll_rewards": [o["reward"] for _, o in ok],
             "reroll_replayed_turns_same": sum(o["replay"]["same"] for _, o in ok),
             "reroll_replayed_turns_differ": sum(len(o["replay"]["differ"]) for _, o in ok),

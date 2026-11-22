@@ -92,6 +92,14 @@ def test_reroll_request_has_the_turns_before_it_as_messages(use, tmp_path):
     assert out[0].tokens == _trial()[0].tokens  # the trial itself trains as generated
 
 
+def test_a_hint_and_verified_credit_go_into_the_request(use):
+    use(lambda traj: traj.steps[2].reroll(2, "verified", hint="Hint: list the hidden files too."))
+    [request] = _record(_run(_trial()))["reroll"]["anchors"]
+    assert (request["n"], request["credit"], request["hint"]) == (2, "verified", "Hint: list the hidden files too.")
+    use(lambda traj: traj.steps[2].reroll())
+    assert _record(_run(_trial()))["reroll"]["anchors"][0]["hint"] is None
+
+
 def test_a_rewrite_before_the_rerolled_step_reaches_only_the_reroll(use):
     def fn(traj):
         traj.steps[1].edit_thinking("list again", "look closer")
@@ -137,6 +145,9 @@ def test_several_steps_branch_n_times_each(use):
     lambda traj: traj.steps[1].reroll(0),
     lambda traj: traj.steps[1].reroll(17),
     lambda traj: traj.steps[1].reroll(1, "group"),
+    lambda traj: traj.steps[1].reroll(1, "verified", hint=""),
+    lambda traj: traj.steps[1].reroll(1, "verified", hint="x" * 2001),
+    lambda traj: traj.steps[1].reroll(1, "verified", hint=3),
     lambda traj: (traj.steps[2].edit_thinking("done", "not yet"), traj.steps[1].reroll()),
     lambda traj: (traj.steps[1].delete(), traj.steps[1].reroll()),
 ])
@@ -202,6 +213,32 @@ def test_the_agent_replays_the_turns_then_calls_the_policy(tmp_path, monkeypatch
     replay = json.loads((tmp_path / "reroll_replay.json").read_text())
     assert replay == {"turns": 2, "same": 1, "differ": [1], "first_message_same": False,
                       "differ_detail": [{"step": 1, "recorded": "out 2", "executed": "out 2 differs"}]}
+
+
+def test_the_agent_shows_the_hint_with_the_policys_first_message(tmp_path, monkeypatch):
+    """The hint ends the message the policy gets first (its prompt, never trained), once, after the comparison."""
+    from harbor.llms.chat import Chat
+
+    from prl.rollout import reroll_agent
+    from prl.rollout.training_terminus import TrainingTerminus2
+
+    request = {"instruction": "TASK", "hint": "Hint: look closer.", "turns": [
+        {"step": 0, "reasoning": "look around", "content": '{"commands": []}', "message": "out 1"}]}
+    (tmp_path / "request.json").write_text(json.dumps(request))
+    policy = []
+
+    async def call_policy(self, chat, prompt):
+        policy.append(prompt)
+        return "policy reply"
+    monkeypatch.setattr(TrainingTerminus2, "_chat_with_retries", call_policy)
+    monkeypatch.setattr(TrainingTerminus2, "__init__", lambda self, *a, **k: None)
+    agent = reroll_agent.RerollTerminus2(reroll_file=str(tmp_path / "request.json"))
+    chat = Chat(model=None, interleaved_thinking=True)
+    for prompt in ("TASK", "out 1\n", "out 2"):
+        asyncio.run(agent._chat_with_retries(chat, prompt))
+    assert policy == ["out 1\n\nHint: look closer.", "out 2"]
+    replay = json.loads((tmp_path / "reroll_replay.json").read_text())
+    assert replay["same"] == 1 and replay["hint_chars"] == len("Hint: look closer.")
 
 
 def test_the_replay_comparison_ignores_the_host_name_and_blank_lines():
@@ -309,6 +346,17 @@ def test_every_branch_runs_with_its_own_seed_and_subgroup_steps_mark_the_trial(w
         (1, 0, "member", "ok"), (2, 0, "subgroup", "ok"), (2, 1, "subgroup", "ok")]
     assert sorted(s.train_metadata["added_id"] for s in out.samples[1:]) == ["reroll:1:0", "reroll:2:0", "reroll:2:1"]
     assert trial.train_metadata["branch_anchors"] == [{"step": 2, "start": 40, "credit": "subgroup"}]
+
+
+def test_a_verified_step_marks_the_trial_with_its_credit(worker, monkeypatch, tmp_path):
+    input, pristine, trial = worker
+    trial.metadata["prl_transform"]["reroll"]["anchors"][0].update(credit="verified", hint="Hint: x.")
+    install(monkeypatch, [SimpleNamespace(metadata={"reward": 1.0, "trial_dir": "/trials/r1"}, status="completed",
+                                          reward=None, loss_mask=[0, 1], train_metadata=None)], tmp_path)
+    out = _reroll(input, pristine, trial)
+    assert trial.train_metadata["branch_anchors"] == [{"step": 2, "start": 40, "credit": "verified"}]
+    assert out.samples[1].train_metadata["branch"] == {"anchor": 2, "credit": "verified"}
+    assert json.loads((tmp_path / "reroll" / "s2_b0" / "request.json").read_text())["hint"] == "Hint: x."
 
 
 def test_a_subgroup_step_without_a_successful_branch_leaves_the_trial_unmarked(worker, monkeypatch):
@@ -425,3 +473,18 @@ def test_reroll_metrics():
     assert out["rollout/reroll/seconds_mean"] == 20.0
     assert out["rollout/transform/ok_trials"] == 3 and "rollout/trial_turns/max" not in out  # the reroll is no trial
     assert out["rollout/raw_reward_min"] == 0.0 and abs(out["rollout/raw_reward_std"] - 0.4714) < 1e-3
+
+
+def test_reroll_metrics_count_the_confirmed_verified_steps():
+    record = {"chain": [{"transform": "t", "status": "ok"}], "trained_tokens_before": 2, "trained_tokens_after": 2,
+              "changed": True}
+
+    def branch(step, status, reward=None):
+        return {"step": step, "status": status, "reward": reward, "seconds": 1.0, "credit": "verified"}
+    confirmed = {**record, "reroll": [branch(3, "ok", 1.0), branch(3, "ok", 0.0)]}
+    unconfirmed = {**record, "reroll": [branch(2, "ok", 0.0), branch(2, "failed")]}
+    out = compute(SimpleNamespace(), [_metric_sample("a", 0.0, prl_transform=confirmed),
+                                      _metric_sample("b", 0.0, prl_transform=unconfirmed)])
+    assert (out["rollout/reroll/verified_steps"], out["rollout/reroll/confirmed_steps"]) == (2, 1)
+    assert "rollout/reroll/verified_steps" not in compute(SimpleNamespace(), [
+        _metric_sample("c", 0.0, prl_transform={**record, "reroll": [{**branch(1, "ok", 1.0), "credit": "subgroup"}]})])

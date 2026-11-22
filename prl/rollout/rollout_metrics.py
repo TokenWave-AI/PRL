@@ -26,7 +26,9 @@ Miles logs the reward and response-length means; this adds what the usual RL das
 - rerolls (``step.reroll()``, prl/rollout/harbor_training.py): ``rollout/reroll/requested_trials`` (trials with a
   branch), ``rollout/reroll/branches`` and ``{ok,failed,subgroup}_branches``,
   ``rollout/reroll/reward_mean`` (the rerolls' verifier rewards) against ``rollout/reroll/source_reward_mean`` (the
-  rerolled trials'), ``rollout/reroll/seconds_mean``; a reroll's own samples are not a trial in the other statistics
+  rerolled trials'), ``rollout/reroll/seconds_mean``; with ``credit="verified"`` ``rollout/reroll/verified_steps``
+  (rerolled steps) and ``rollout/reroll/confirmed_steps`` (those with a branch that scored more than the trial); a
+  reroll's own samples are not a trial in the other statistics
 - ``rollout/abort_retried_trials``: trials kept after an aborted attempt was run again on its own
   (``prl_abort_retries``, prl/rollout/harbor_training.py); the trials that aborted every time are not in
   ``samples`` (Miles refilled their groups)
@@ -87,7 +89,7 @@ def compute(args, samples) -> dict:
     t_trials = t_changed = t_before = t_after = t_new = 0
     abort_retried = 0
     reroll = {"requested": 0, "branches": 0, "ok": 0, "failed": 0, "subgroup": 0, "reward": [], "source": [],
-              "seconds": []}
+              "seconds": [], "verified": 0, "confirmed": 0}
     for ss in trials.values():
         md = ss[0].metadata or {}
         if "prl_reroll" in md:
@@ -115,6 +117,13 @@ def compute(args, samples) -> dict:
                 if ro["status"] == "ok":
                     reroll["reward"].append(float(ro["reward"]))
                     reroll["source"].append(float(ss[0].get_reward_value(args)))
+            # verified credit: a step is confirmed when one of its branches scored more than the trial
+            verified = {ro.get("step") for ro in branches if ro.get("credit") == "verified"}
+            if verified:
+                own = float(ss[0].get_reward_value(args))
+                reroll["verified"] += len(verified)
+                reroll["confirmed"] += sum(any(ro["status"] == "ok" and ro.get("step") == k and float(ro["reward"]) > own
+                                               for ro in branches) for k in verified)
             chain = tr.get("chain") or []
             worst = [e.get("status") for e in chain]
             status["error" if "error" in worst else "skipped" if "skipped" in worst else "ok"] += 1
@@ -167,6 +176,9 @@ def compute(args, samples) -> dict:
         out |= {f"rollout/reroll/{k}_branches": reroll[k] for k in ("ok", "failed", "subgroup")}
         out["rollout/reroll/branches"] = reroll["branches"]
         out["rollout/reroll/seconds_mean"] = float(st.mean(reroll["seconds"]))
+        if reroll["verified"]:
+            out["rollout/reroll/verified_steps"] = reroll["verified"]
+            out["rollout/reroll/confirmed_steps"] = reroll["confirmed"]
         if reroll["reward"]:
             out["rollout/reroll/reward_mean"] = float(st.mean(reroll["reward"]))
             out["rollout/reroll/source_reward_mean"] = float(st.mean(reroll["source"]))

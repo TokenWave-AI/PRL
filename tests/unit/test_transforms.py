@@ -306,6 +306,45 @@ def test_atlas_soft_and_unlabeled(labels, monkeypatch):
     assert kept[0].metadata["prl_transform"]["chain"][0]["status"] == "skipped"
 
 
+def _sized_trial(sizes, trial_dir="/runs/r/harbor_trials/t__1"):
+    """One sample whose steps have these numbers of trained tokens, each followed by an observation."""
+    return [_sample("TASK", [part for n in sizes for part in (("s" * n, 1), ("o", 0))], trial_dir=trial_dir)]
+
+
+def test_atlas_random_keeps_a_token_share_without_the_judge(monkeypatch):
+    async def no_judge(traj):
+        raise AssertionError("select random must not call the judge")
+
+    monkeypatch.setattr(atlas_module.labeler, "label", no_judge)
+    monkeypatch.setenv("PRL_TRANSFORM", "atlas")
+    monkeypatch.setenv("PRL_TRANSFORM_ARGS", '{"select": "random", "keep_tokens": 0.3}')
+    sizes = [5, 40, 7, 12, 3, 25, 9, 14, 6, 30]
+    picks = set()
+    for trial in range(20):
+        kept = _run(_sized_trial(sizes, trial_dir=f"/runs/r/harbor_trials/t__{trial}"))
+        record = kept[0].metadata["prl_transform"]
+        atlas = record["chain"][0]["record"]["atlas"]
+        assert atlas["select"] == "random" and atlas["steps"] == 10 and atlas["critical"]
+        # The draw stops at the first step that would not bring the share closer: within half a step of the target
+        assert abs(record["trained_tokens_after"] - 0.3 * sum(sizes)) <= max(sizes) / 2
+        assert record["trained_tokens_after"] == sum(sizes[n - 1] for n in atlas["critical"])
+        picks.add(tuple(atlas["critical"]))
+    assert len(picks) > 10  # the trial directory changes the draw
+    again = _run(_sized_trial(sizes, trial_dir="/runs/r/harbor_trials/t__0"))
+    first = _run(_sized_trial(sizes, trial_dir="/runs/r/harbor_trials/t__0"))
+    assert again[0].loss_mask == first[0].loss_mask  # the same trial draws the same steps
+    monkeypatch.setenv("PRL_TRANSFORM_ARGS", '{"select": "random", "keep_tokens": 0.01}')
+    kept = _run(_sized_trial(sizes))
+    assert len(kept[0].metadata["prl_transform"]["chain"][0]["record"]["atlas"]["critical"]) == 1  # at least one
+
+
+@pytest.mark.parametrize("args", [{"select": "entropy"}, {"select": "random", "keep_tokens": 0}, {"keep_tokens": 1.5}])
+def test_atlas_rejects_bad_params(args):
+    traj = SimpleNamespace(reward=1.0, steps=[], record={}, trial_dir=None, task="T")
+    with pytest.raises(ValueError):
+        asyncio.run(atlas_module.atlas(traj, **args))
+
+
 
 @pytest.fixture
 def grades(monkeypatch):
