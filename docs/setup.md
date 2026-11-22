@@ -37,11 +37,14 @@ dependencies, the tasks (728 training + 70 TB-dev), the weights and their Megatr
 - **Logs**: in `$PRL_EXT/logs/`; each run's `train.log` (`$PRL_EXT/runs/<run>/`) has a line per update, `step N:
   {'train/loss': ...}`; the quick start prints both places. Harmless at the start: SGLang's `post-warmup freeze_gc
   failed` with a `Connection refused` traceback, FlashInfer's `workspace preflight probe failed (...
-  CUDA_ERROR_NOT_SUPPORTED: 801)` on GB200, and Apptainer's `signature not found` for the pulled (unsigned) image. Later
+  CUDA_ERROR_NOT_SUPPORTED: 801)` on GB200, Apptainer's `signature not found` for the pulled (unsigned) image, and at the end of the convert step
+`Stack (most recent call first): <no Python frame>` after `Log directory: None` (an exit handler). Later
   a trial's `failed to send non-blocking keys ... no server running` (Harbor's tmux) is tried again by itself
   (`rollout/abort_retried_trials`), as is one that Harbor aborts with `Command ended without an end event` (a traceback,
   then Miles' unrelated `All samples truncated`; then `trial aborted, retrying it alone`), and one with `mismatch_refill
   rejected` (its tokens did not match the inference server's; `exhausted`: its group is replaced).
+- A job you cancel leaves its open sandboxes running until they expire, at most 30 min after their last renewal
+  (`sandbox_timeout_secs` in `HARBOR_ENV_KWARGS`, `configs/arms/common_ota.env`).
 - `DRY_RUN=1` prints the scheduler command and submits nothing; `ELAPSE=hh:mm:ss` sets a job's time limit and
   `QUEUE=<queue>` its queue (PBS) or resource group (PJM), e.g. a short debug queue for the quicker first try, with
   `ELAPSE` within its limit (`ELAPSE=01:00:00` is enough when the image is already pulled: below). A job stopped by its

@@ -74,7 +74,7 @@ for s in "${snapshots[@]}"; do
     mkdir -p "$(dirname "$out")"
     echo "   batch $((i / n + 1)): ${#batch[@]} tasks, build record $out"
     PRL_IMAGE_TASK_ROOT=$s/tasks PRL_IMAGE_TASKS=$(IFS=,; echo "${batch[*]}") PRL_IMAGE_OUTPUT=$out \
-      "$py" scripts/tools/prebuild_task_images.py > "$out.log"
+      "$py" -u scripts/tools/prebuild_task_images.py > "$out.log"   # -u: the log fills as the builds go
     PRL_BUILD_MANIFEST=$out/manifest.json PRL_SNAPSHOT_MANIFEST=$s/manifest.json "$py" scripts/tools/register_templates.py
   done
   left=$(todo "$s" "${rows[@]}" | sed '/^$/d' | wc -l)

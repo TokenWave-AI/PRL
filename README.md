@@ -102,13 +102,17 @@ This layer samples more: the policy continues from the step you pick in a fresh 
 | To | Write | The framework |
 |---|---|---|
 | let the policy run n more times from this step | `step.reroll(n=2, credit="subgroup")` | replays the steps before it in new sandboxes, the policy continues, the tests grade; the new trajectories train too (several steps are allowed; `credit`: see [Going further](#going-further)) |
+| ... with a hint for those runs | `step.reroll(n=2, credit="verified", hint="Re-read the task.")` | shows the hint to the policy before the step: part of its prompt, never trained |
+
+Not for a trajectory the context summary split into parts (`len(traj.samples) > 1`): check it before you call `reroll`.
 
 ### Helpers
 
 | To | Write | The framework |
 |---|---|---|
 | ask a teacher / judge | `await ask(prompt, check=...)` | retries, rate limits, timeouts, the next model on a refusal; every call recorded |
-| leave a trajectory alone | `traj.skip("reason")` | trains it unchanged and records the reason |
+| leave a trajectory alone | `return traj` (change nothing) | trains it unchanged |
+| give up on a trajectory | `traj.skip("reason")` | trains it unchanged and records the reason; many in a row stop the run (`PRL_TRANSFORM_MAX_FAILURES`) |
 | keep a record | `traj.record["key"] = ...` | saves it in the trajectory's `transform.json` |
 
 **Teacher**: called with `ask` from your function. It sees the whole trajectory and can score steps (→ Reweight),
@@ -124,10 +128,11 @@ Ready transforms:
 
 | Name | What it does | Layers | Model calls per trajectory |
 |---|---|---|---|
-| `atlas` | a judge picks the critical steps; the others do not train (or train scaled) | Reweight | judge, 1 |
+| `atlas` | a judge picks the critical steps; the others do not train (or train scaled); `select="random"`: random steps of the same token share instead, the control without a judge | Reweight | judge, 1 (random: 0) |
 | `atlas_signed` | a judge marks good / bad steps, bad ones are pushed the other way; `quote_bad` pushes only the span that went wrong | Reweight | judge, 1 |
 | `rewrite` | a teacher rewrites / fixes only failures / its text is context only / picks a step to start over from | Rewrite, Reroll | teacher, 1 |
 | `branch` | branch template: select × allocate × credit | Reroll | depends on select (`first_bad`, `teacher`: 1 each) |
+| `hint_reroll` | a judge names a failed trajectory's first wrong step and writes a hint of at most 15 words (where to look again, no command); the policy tries again from there twice with it, `credit="verified"` | Reroll | judge, 1 |
 
 ## Results
 
@@ -173,7 +178,7 @@ cp configs/sites/example.env configs/sites/mysite.env      # mysite: any name; t
 mkdir -p /path/to/work/private && chmod 700 /path/to/work/private
 cp <sandbox service key> /path/to/work/private/e2b_api_key
 cp <judge key> /path/to/work/private/judge_api_key
-cp <registry credentials> /path/to/work/private/registry_credentials.json   # {"username": ..., "password": ...}
+cp <registry credentials> /path/to/work/private/registry_credentials.json   # only where step 5 builds: {"username": ..., "password": ...}
 chmod 600 /path/to/work/private/*
 ```
 
@@ -183,7 +188,9 @@ chmod 600 /path/to/work/private/*
 sudo docker login <registry>
 ```
 
-**5. Build the sandboxes** (an image and a template per task) on that machine; for a first try only the smoke's 8 tasks, a few minutes:
+(Docker that needs its own config directory: `PRL_DOCKER_COMMAND="sudo docker --config <dir>"`, [`docs/sandboxes.md`](docs/sandboxes.md).)
+
+**5. Build the sandboxes** (an image and a template per task) on that machine; for a first try only the smoke's 8 tasks, about 10 minutes:
 
 ```bash
 PRL_SITE=mysite PRL_SANDBOX_SMOKE_ONLY=1 bash scripts/setup/build_sandboxes.sh
@@ -216,7 +223,7 @@ PRL_SITE=mysite bash scripts/quickstart.sh                 # on the cluster, as 
 
 - Another transform: `TRANSFORM=atlas` (any of `transforms/`, yours too: below); the default is signed ATLAS, 58.09% in the results, with the judge at the reasoning effort low that its arm sets (`PRL_JUDGE_EXTRA_BODY`; the 58.09% run used gpt-6.1-sol).
 - Parameters: `PRL_TRANSFORM_ARGS='{"other_weight": 0.3}'`; algorithm: `ALGO=reinforce_plus_plus` (`ALGO=ppo` after its own smoke, [`CONTRIBUTING.md`](CONTRIBUTING.md)); chains: `TRANSFORM=rewrite+atlas` (run in order; `+`, not a comma, because the submit commands split variables on commas), with params per name: `PRL_TRANSFORM_ARGS='{"atlas": {"other_weight": 0.3}}'`.
-- What the transform did, a line per trajectory in `train.log`: `[prl] transform <name> on <trajectory>: ok; steps changed: <e.g. 5 weighted, 2 masked>; <kept>/<all> trained tokens kept` (`[prl] step weights: ...`, one line per training rank, counts samples, a trajectory split by the context summary being several, and step weights only, not masks; its last count, `with subgroup advantage spans`, the samples scored against their reroll siblings). The TB-dev score is `eval/heldout` in the evaluation's `train.log`.
+- What the transform did, a line per trajectory in `train.log`: `[prl] transform <name> on <trajectory>: ok; steps changed: <e.g. 5 weighted, 2 masked>; <kept>/<all> trained tokens kept` (`[prl] step weights: ...`, one line per training rank, counts samples, a trajectory split by the context summary being several, and step weights only, not masks; its last count, `with subgroup advantage spans`, the original trajectories scored against their reroll siblings from a branch point on: with `verified` only those a branch beat). The pass rate of the trajectories is `rollout/episode_raw_reward`; `rollout/raw_reward_unfiltered` counts samples (a branch, a split trajectory's parts). The TB-dev score is `eval/heldout` in the evaluation's `train.log`; from the trials: `python3 scripts/tools/tbdev_score.py --samples 8 <the eval's harbor_trials>` (a trial the sandbox service failed runs again, up to 2 more times, and `--samples` leaves the failed attempts out; `PRL_EVAL_SANDBOX_RETRIES=0` scores it 0 as TB-dev's own scoring does, and `--drop-sandbox-failures` compares with such an evaluation).
 - A full run stopped by its time limit goes on when the same command is run again.
 
 **Your own transform: write, try, train.**
@@ -245,13 +252,14 @@ PRL_TRANSFORM=my_transform MODEL_HF_DIR=tokenizer \
 PRL_TRANSFORM_CHECK_OUT=/tmp/check python -m prl.transforms.check
 ```
 
-A function that asks a model uses the judge of the site profile: `set -a; source configs/sites/mysite.env; set +a` first (on another machine than the cluster, `export PRL_JUDGE_KEY_FILE=<the key file here>` before it). What the quick start trains by default: `PRL_TRANSFORM=atlas_signed PRL_TRANSFORM_ARGS='{"failed_good_weight": 0.0}'`.
+A function that asks a model uses the judge of the site profile: `set -a; source configs/sites/mysite.env; set +a` first (on another machine than the cluster, `export PRL_JUDGE_KEY_FILE=<the key file here>` before it). What the quick start trains by default: `PRL_TRANSFORM=atlas_signed PRL_TRANSFORM_ARGS='{"failed_good_weight": 0.0}'`. The training arm may set more judge settings than the profile (signed ATLAS: `PRL_JUDGE_EXTRA_BODY='{"reasoning_effort": "low"}'`); set them here too to check with the same ones. Reuse an output directory only empty: files of an earlier check stay.
 
 - The terminal shows one line per trajectory: `[transform check] <trajectory>: reward <reward>, <steps> steps, <status>, steps changed: <e.g. 5 weighted, 2 masked>, trained tokens <before> -> <after>, <seconds> s`,
   where the status is `ok` or `skipped` (a skipped line ends with the reason; between them the framework's own lines, `[prl] transform ... trained tokens kept`, and with a judge its HTTP requests). A last line `passed` means it passed; otherwise it prints `FAILED`, the trajectory and the reason.
 - The output directory has one subdirectory per trajectory: `transform.json` is the framework's record (each function's status and time, what you wrote into `traj.record`,
   the steps it changed, e.g. `weighted_steps` {step: new weight}, the trainable tokens before / after) and `transform_calls.json` every `ask` request and answer (the ATLAS judge's: `atlas_labels.json`); `summary.json` sums up all 8.
-- The step lists count from 0, as `step.index`; ATLAS' own labels (`critical`, `good` / `bad`, `atlas_labels.json`) from 1, as in the judge's prompt.
+- The step lists count from 0, as `step.index`; the judges' own numbers (ATLAS' `critical`, `good` / `bad`, `atlas_labels.json`; `hint_reroll`'s `step`) from 1, as in their prompts.
+- The recorded trajectories have no rollout log probs (`surprisal` sees all 0) and no test output (`hint_reroll`'s judge sees none): such choices show in training only. Your own trajectories: `scripts/tools/make_transform_fixture.py` makes a fixture from a run's `traces/rollout_data/<update>.pt`, `PRL_TRANSFORM_FIXTURE=<it>` checks on it.
 - A reroll is only recorded here (`reroll` in `transform.json`: the steps and the turns to replay); its branches run in training, where the quick start picks the arm a reroll needs by itself.
 
 **③ Train and evaluate it**: `PRL_SITE=mysite TRANSFORM=my_transform bash scripts/quickstart.sh`. The job first runs your function on the recorded trajectories and does not start training if it raises, times out or skips them all.
@@ -276,6 +284,9 @@ The first k steps are replayed as they were in new sandboxes; from step k on the
 - `member`: the new trajectory is one more member of the group and enters its mean and variance.
 - `subgroup`: the new trajectory is compared only with those from the same start: the original trajectory from step k on, plus the other branches at that step.
   The original keeps its group advantage before step k and takes the subgroup's value from step k on. GRPO only.
+- `verified`: as `subgroup` when a branch scored more than the original (the state at step k could still succeed), and then the original's steps before k get advantage 0 (not blamed); when no branch did, the original trains as in GRPO. GRPO only.
+
+`reroll(..., hint="...")` shows the branches' policy a hint before step k (part of its prompt, never trained); `hint_reroll.py` asks a judge for one.
 
 A run with branches needs the arm with the branch post-processing: `ARM=ota_train_transform_reroll`.
 
@@ -294,7 +305,7 @@ TRANSFORM=branch PRL_TRANSFORM_ARGS='{
 |---|---|---|
 | `select` | where to branch | `middle` · `teacher` (a teacher picks the step and may edit the steps before it) · `first_bad` (the first bad step the judge marks) · `surprisal` (the step that surprised the policy most) · your function |
 | `allocate` | how many times | `fixed` (n per step; `only` picks failures / successes / all); `view`: this trajectory alone (`trial`) or the whole group (`group`, planned) |
-| `credit` | how a new trajectory is scored | `member` · `subgroup` (`value` planned) |
+| `credit` | how a new trajectory is scored | `member` · `subgroup` · `verified` (`value` planned) |
 
 What each option means: [`transforms/README.md`](transforms/README.md#3-branch-template).
 

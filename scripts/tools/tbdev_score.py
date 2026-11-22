@@ -21,11 +21,15 @@ from pathlib import Path
 SANDBOX_FAILURES = ("RateLimitException", "SandboxException", "Command ended without an end event",
                     "ReadTimeout", "RemoteProtocolError", "TimeoutException")
 
-ap = argparse.ArgumentParser()
-ap.add_argument("--strict", action="store_true")
-ap.add_argument("--samples", type=int, default=0)
-ap.add_argument("--drop-sandbox-failures", action="store_true")
-ap.add_argument("dirs", nargs="+")
+ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0], formatter_class=argparse.RawDescriptionHelpFormatter)
+ap.add_argument("--strict", action="store_true", help="score every trial with an exception 0, graded or not")
+retried = ap.add_mutually_exclusive_group()
+retried.add_argument("--samples", type=int, default=0, metavar="N",
+                     help="the eval's EVAL_N_SAMPLES: drop the sandbox failures a task ran again, down to N trials")
+retried.add_argument("--drop-sandbox-failures", action="store_true",
+                     help="leave every sandbox failure out; the mean of each task's mean (to compare with an "
+                          "evaluation that did not run them again)")
+ap.add_argument("dirs", nargs="+", help="harbor_trials directories (an eval job's, plus any rerun of its trials)")
 args = ap.parse_args()
 per, exc = collections.defaultdict(list), collections.Counter()
 for d in args.dirs:
@@ -56,6 +60,8 @@ if args.drop_sandbox_failures:
             del per[task]  # every trial of it failed on the sandbox service: nothing to score
 for trials in per.values():
     exc.update(t[3] for t in trials if t[3])
+if not per:
+    raise SystemExit(f"no trial result.json under {' '.join(args.dirs)}")
 n, total = sum(map(len, per.values())), sum(t[1] for trials in per.values() for t in trials)
 mean = (sum(sum(t[1] for t in trials) / len(trials) for trials in per.values()) / len(per)
         if args.drop_sandbox_failures else total / n)

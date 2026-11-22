@@ -10,8 +10,10 @@ ROOT = Path(__file__).resolve().parents[2]
 ASSIGN = re.compile(r"^\s*(?:export\s+)?([A-Z][A-Z0-9_]*)=", re.MULTILINE)
 # Where the variables are read: our code, our Miles patches (PRL_ROLLOUT_ON_HEAD) and the Miles Harbor recipe
 # (HARBOR_* / AGENT_*, through scripts/run.sh)
+# (the patched copy in build/, else the upstream one in third_party/: the recipe files are the same)
+MILES = "build/miles" if (ROOT / "build/miles").is_dir() else "third_party/miles"
 READERS = ("scripts", "prl", "transforms", "configs", "patches",
-           "build/miles/examples/experimental/harbor", "build/miles/examples/swe-agent-harbor-docker")
+           f"{MILES}/examples/experimental/harbor", f"{MILES}/examples/swe-agent-harbor-docker")
 # Read under a built name: prl/algo/llm_client.py reads f"{prefix}KEY_FILE"
 BUILT = {"PRL_JUDGE_KEY_FILE"}
 SUFFIXES = (".sh", ".py", ".env", ".inner", ".pbs", ".patch", "")

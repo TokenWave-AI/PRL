@@ -81,6 +81,12 @@ def test_surprisal_picks_the_least_likely_steps(run):
     assert [(a["step"], a["credit"]) for a in record["reroll"]["anchors"]] == [(1, "subgroup"), (2, "subgroup")]
 
 
+def test_surprisal_ranks_past_the_steps_before_min_step(run):
+    # step 0 is the least likely, but a branch from it is just a new trial: the next one is taken instead
+    record, _ = run({"select": "surprisal"}, _trial(logprobs=(-5.0, -0.2, -3.0)))
+    assert [a["step"] for a in record["reroll"]["anchors"]] == [2]
+
+
 def test_first_bad_uses_the_judge_and_min_step_drops_step_zero(run, monkeypatch):
     from prl.algo import labeler
 

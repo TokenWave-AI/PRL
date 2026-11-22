@@ -102,13 +102,17 @@ PRL_SITE=mysite TRANSFORM=atlas bash scripts/quickstart.sh
 | 你想做的 | 写法 | 框架做什么 |
 |---|---|---|
 | 从这一步开始让策略再跑 n 次 | `step.reroll(n=2, credit="subgroup")` | 新沙盒重放前几步，策略接着跑，测试打分；新轨迹也参与训练（可以多处，`credit` 见[进阶用法](#进阶用法)） |
+| ……并给这几次一句提示 | `step.reroll(n=2, credit="verified", hint="Re-read the task.")` | 在这一步之前把提示给策略看：属于 prompt，不训练 |
+
+被上下文总结切开的轨迹（`len(traj.samples) > 1`）不能分支：调 `reroll` 前先判断。
 
 ### 辅助功能
 
 | 你想做的 | 写法 | 框架做什么 |
 |---|---|---|
 | 问教师 / 判官 | `await ask(prompt, check=...)` | 重试、限流、超时、被拒时换备选模型，每次调用都存档 |
-| 这条不处理 | `traj.skip("原因")` | 原样训练，原因记下来 |
+| 这条不处理 | `return traj`（什么都不改） | 原样训练 |
+| 这条做不了 | `traj.skip("原因")` | 原样训练，原因记下来；连续太多条会停掉训练（`PRL_TRANSFORM_MAX_FAILURES`） |
 | 留记录 | `traj.record["key"] = ...` | 存进这条轨迹的 `transform.json` |
 
 **教师**：通过在函数里 `ask` 调用；它看得到整条轨迹，可以给步骤打分（→ Reweight）、
@@ -124,10 +128,11 @@ PRL_SITE=mysite TRANSFORM=atlas bash scripts/quickstart.sh
 
 | 名字 | 做法 | 用到的层 | 每条轨迹的模型调用 |
 |---|---|---|---|
-| `atlas` | 判官选关键步，其余不学（或按比例学） | Reweight | 判官 1 次 |
+| `atlas` | 判官选关键步，其余不学（或按比例学）；`select="random"`：换成 token 占比相同的随机步，不用判官的对照 | Reweight | 判官 1 次（random：0） |
 | `atlas_signed` | 判官分好 / 坏步，坏步反着推；`quote_bad` 只推出错的那段文字 | Reweight | 判官 1 次 |
 | `rewrite` | 教师改写 / 只修失败的 / 教师的文字只做上下文 / 教师选点后重来 | Rewrite、Reroll | 教师 1 次 |
 | `branch` | 分支模板：select × allocate × credit | Reroll | 取决于 select（`first_bad`、`teacher` 各 1 次） |
+| `hint_reroll` | 判官找失败轨迹第一个走错的步骤，写一句不超过 15 词的提示（只说回头看哪里，不给命令）；策略带着提示从那里再试 2 次，`credit="verified"` | Reroll | 判官 1 次 |
 
 ## 结果
 
@@ -173,7 +178,7 @@ cp configs/sites/example.env configs/sites/mysite.env      # mysite 可以随便
 mkdir -p /path/to/work/private && chmod 700 /path/to/work/private
 cp <沙盒服务的 key> /path/to/work/private/e2b_api_key
 cp <判官的 key> /path/to/work/private/judge_api_key
-cp <registry 凭据> /path/to/work/private/registry_credentials.json   # {"username": ..., "password": ...}
+cp <registry 凭据> /path/to/work/private/registry_credentials.json   # 只在第 5 步建沙盒的机器上：{"username": ..., "password": ...}
 chmod 600 /path/to/work/private/*
 ```
 
@@ -183,7 +188,9 @@ chmod 600 /path/to/work/private/*
 sudo docker login <registry>
 ```
 
-**5. 建沙盒**（每个任务一个镜像和一个 template），还是在那台机器上；第一次先只建烟测的 8 个任务，几分钟：
+（Docker 要用自己的配置目录时：`PRL_DOCKER_COMMAND="sudo docker --config <dir>"`，见 [`docs/sandboxes.md`](docs/sandboxes.md)。）
+
+**5. 建沙盒**（每个任务一个镜像和一个 template），还是在那台机器上；第一次先只建烟测的 8 个任务，约 10 分钟：
 
 ```bash
 PRL_SITE=mysite PRL_SANDBOX_SMOKE_ONLY=1 bash scripts/setup/build_sandboxes.sh
@@ -216,7 +223,7 @@ PRL_SITE=mysite bash scripts/quickstart.sh                 # 在集群上，同�
 
 - 换 transform：`TRANSFORM=atlas`（`transforms/` 里的任意一个，包括你自己写的，见下）；默认是 signed ATLAS，结果表里的 58.09%，判官用它的 arm 设的 reasoning effort low（`PRL_JUDGE_EXTRA_BODY`；58.09% 那次用的是 gpt-6.1-sol）。
 - 改参数：`PRL_TRANSFORM_ARGS='{"other_weight": 0.3}'`；换算法：`ALGO=reinforce_plus_plus`（`ALGO=ppo` 要先跑它自己的烟测，见 [`CONTRIBUTING.md`](CONTRIBUTING.md)）；串联：`TRANSFORM=rewrite+atlas`（按顺序执行；用 `+` 不用逗号，因为提交命令按逗号切分变量），参数按名字给：`PRL_TRANSFORM_ARGS='{"atlas": {"other_weight": 0.3}}'`。
-- transform 对每条轨迹做了什么，`train.log` 里各有一行 `[prl] transform <名字> on <轨迹>: ok; steps changed: <如 5 weighted, 2 masked>; <保留>/<全部> trained tokens kept`（`[prl] step weights: ...` 每个训练 rank 一行，按样本计数，被上下文总结切开的轨迹算多个样本，而且只统计步骤权重，不含 mask；它最后一项 `with subgroup advantage spans` 是和 reroll 兄弟分支比较打分的样本数）。TB-dev 分数是评测那份 `train.log` 里的 `eval/heldout`。
+- transform 对每条轨迹做了什么，`train.log` 里各有一行 `[prl] transform <名字> on <轨迹>: ok; steps changed: <如 5 weighted, 2 masked>; <保留>/<全部> trained tokens kept`（`[prl] step weights: ...` 每个训练 rank 一行，按样本计数，被上下文总结切开的轨迹算多个样本，而且只统计步骤权重，不含 mask；它最后一项 `with subgroup advantage spans` 是从分支点起和 reroll 兄弟比较打分的原轨迹数：`verified` 只算被分支超过的那些）。轨迹的通过率是 `rollout/episode_raw_reward`；`rollout/raw_reward_unfiltered` 按样本算（分支、被切开轨迹的各段都算）。TB-dev 分数是评测那份 `train.log` 里的 `eval/heldout`；从 trial 算：`python3 scripts/tools/tbdev_score.py --samples 8 <评测的 harbor_trials>`（被沙盒服务弄失败的 trial 会再跑，最多再 2 次，`--samples` 把失败的那几次去掉；`PRL_EVAL_SANDBOX_RETRIES=0` 则像 TB-dev 自己的打分一样记 0，和这样的评测比用 `--drop-sandbox-failures`）。
 - 完整训练到时限被停掉的话，再运行同一条命令会接着跑。
 
 **写自己的 transform：写、试、训。**
@@ -245,13 +252,14 @@ PRL_TRANSFORM=my_transform MODEL_HF_DIR=tokenizer \
 PRL_TRANSFORM_CHECK_OUT=/tmp/check python -m prl.transforms.check
 ```
 
-函数要问模型的话，用站点配置里的判官：先运行 `set -a; source configs/sites/mysite.env; set +a`（不在集群上运行时，在这之前 `export PRL_JUDGE_KEY_FILE=<本机的 key 文件>`）。快速开始默认训练的是 `PRL_TRANSFORM=atlas_signed PRL_TRANSFORM_ARGS='{"failed_good_weight": 0.0}'`。
+函数要问模型的话，用站点配置里的判官：先运行 `set -a; source configs/sites/mysite.env; set +a`（不在集群上运行时，在这之前 `export PRL_JUDGE_KEY_FILE=<本机的 key 文件>`）。快速开始默认训练的是 `PRL_TRANSFORM=atlas_signed PRL_TRANSFORM_ARGS='{"failed_good_weight": 0.0}'`。训练用的 arm 可能比站点配置多设几个判官参数（signed ATLAS：`PRL_JUDGE_EXTRA_BODY='{"reasoning_effort": "low"}'`），想用同样的设置检查就在这里也设上。输出目录要用空的：上一次检查的文件会留着。
 
 - 终端里每条轨迹一行：`[transform check] <轨迹>: reward <分数>, <步数> steps, <状态>, steps changed: <如 5 weighted, 2 masked>, trained tokens <改前> -> <改后>, <秒数> s`，
   状态是 `ok` 或 `skipped`（skipped 的行末尾写着原因；中间夹着框架自己的日志行 `[prl] transform ... trained tokens kept`，问判官时还有它的 HTTP 请求）。最后一行是 `passed` 为通过；出错时打印 `FAILED`、出错的轨迹和原因。
 - 输出目录里每条轨迹一个子目录：`transform.json` 是框架的记录（每个函数的状态和用时、你写进 `traj.record` 的内容、
   改了哪些步骤，如 `weighted_steps` {步骤: 新权重}、可训练 token 改前 / 改后的数量），`transform_calls.json` 是每次 `ask` 的请求和回答（ATLAS 判官的在 `atlas_labels.json`）；`summary.json` 汇总全部 8 条。
-- 步骤列表从 0 数，和 `step.index` 一样；ATLAS 自己的标注（`critical`、`good` / `bad`、`atlas_labels.json`）和判官的 prompt 一样从 1 数。
+- 步骤列表从 0 数，和 `step.index` 一样；判官自己的编号（ATLAS 的 `critical`、`good` / `bad`、`atlas_labels.json`；`hint_reroll` 的 `step`）和它们的 prompt 一样从 1 数。
+- 录好的轨迹没有 rollout log prob（`surprisal` 看到的都是 0），也没有测试输出（`hint_reroll` 的判官看不到）：这类选择只在训练里看得出来。用自己的轨迹：`scripts/tools/make_transform_fixture.py` 从一次运行的 `traces/rollout_data/<update>.pt` 做 fixture，`PRL_TRANSFORM_FIXTURE=<它>` 就在它上面检查。
 - reroll 在这里只记录请求（`transform.json` 的 `reroll`：从哪些步分支、要重放哪些轮），分支在训练时才真正跑；训练时快速开始会自动选 reroll 需要的 arm。
 
 **③ 训练 + 评测**：`PRL_SITE=mysite TRANSFORM=my_transform bash scripts/quickstart.sh`。作业开头会先在录好的轨迹上试跑你的函数，函数报错、超时或全部跳过就不开训。
@@ -276,6 +284,9 @@ traj.steps[k].reroll(n=2, credit="subgroup")   # 从第 k 步开始让策略再�
 - `member`：新轨迹作为这一组多出来的成员，和其他轨迹一起算均值、方差。
 - `subgroup`：新轨迹只和"同一起点出发的"比，也就是原轨迹从第 k 步起的部分加上同处的其他分支。
   原轨迹在第 k 步之前保持组 advantage，从第 k 步起换成这个小组里比出来的值。只支持 GRPO。
+- `verified`：有分支比原轨迹分高（第 k 步的状态还能成功）时同 `subgroup`，并且原轨迹第 k 步之前的 advantage 记 0（不背锅）；没有分支比它高时，原轨迹照 GRPO 训练。只支持 GRPO。
+
+`reroll(..., hint="...")` 在第 k 步之前给分支里的策略一句提示（属于 prompt，不训练）；`hint_reroll.py` 让判官来写。
 
 用分支的运行要换成带分支后处理的 arm：`ARM=ota_train_transform_reroll`。
 
@@ -294,7 +305,7 @@ TRANSFORM=branch PRL_TRANSFORM_ARGS='{
 |---|---|---|
 | `select` | 在哪分支 | `middle` · `teacher`（教师选步，可以先改前面几步）· `first_bad`（判官标的第一个坏步骤）· `surprisal`（策略最"意外"的一步）· 你的函数 |
 | `allocate` | 分几次 | `fixed`（每处 n 次，`only` 选只给失败 / 成功 / 全部）；`view` 选只看这一条（`trial`）还是看整组再分（`group`，规划中） |
-| `credit` | 新轨迹怎么算分 | `member` · `subgroup`（`value` 规划中） |
+| `credit` | 新轨迹怎么算分 | `member` · `subgroup` · `verified`（`value` 规划中） |
 
 选项具体含义见 [`transforms/README.zh-CN.md`](transforms/README.zh-CN.md#3-分支模板)。
 

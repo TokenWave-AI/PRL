@@ -4,8 +4,8 @@
   per change, listed in [`patches/README.md`](patches/README.md). Runtime code runs from `build/`.
 - Settings are environment variables prefixed `PRL_`, documented in each module's docstring and forwarded by
   `scripts/run.sh`. Infrastructure failures raise; a reward of 0 means a real failure.
-- Tests: `python -m pytest -q tests/unit` (`test_fused_logprob.py` and `test_step_advantage.py` need torch, for
-  example inside the Miles image). Changing a framework source listed in `SOURCE_FILES` of
+- Tests: `pip install -e '.[check,dev]'`, then `python -m pytest -q tests/unit`; the tests that need torch, Miles or
+  Harbor skip without them (all of them run inside the Miles image, `CHAIN=unit`). Changing a framework source listed in `SOURCE_FILES` of
   `scripts/checks/grpo_acceptance.py` (the transform core and check, the rollout adapters, `scripts/run.sh`)
   invalidates the smoke receipts; run a new framework smoke.
 - Framework smokes: `CHAIN=smoke_grpo TRANSFORM=atlas` (GRPO; the reroll and async smokes:

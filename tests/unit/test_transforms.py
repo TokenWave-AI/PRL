@@ -841,3 +841,53 @@ def test_the_log_line_names_the_steps_changed_and_the_params_have_defaults(use, 
     assert "ok; steps changed: 1 weighted, 1 masked; 2/4 trained tokens kept" in caplog.text
     record = json.loads((tmp_path / "transform.json").read_text())
     assert record["chain"][0]["params"] == {"factor": -1.0}
+
+
+def test_a_chain_sees_the_turns_an_earlier_function_masked(use, monkeypatch):
+    seen = []
+
+    def mask_first(traj):
+        traj.steps[0].mask()
+
+    def look(traj):
+        seen.append([(s.index, s.action, s.masked) for s in traj.steps])
+        traj.steps[2].weight = 0.5
+
+    use(mask_first, name="a")
+    use(look, name="b")
+    monkeypatch.setenv("PRL_TRANSFORM", "a+b")
+    kept = _run(_trial())
+    assert seen == [[(0, "A", True), (1, "BB", False), (2, "C", False)]]  # same turns, same numbers
+    by_node = {s.metadata["leaf"]["node_id"]: s for s in kept}
+    assert by_node[4].loss_mask[:1] == [0] and by_node[4].train_metadata["step_weights"] == [1.0]
+    assert by_node[9].train_metadata["step_weights"] == [0.5]
+
+
+def test_a_later_function_may_unmask_or_mask_a_weighted_turn(use, monkeypatch):
+    def weigh_first(traj):
+        traj.steps[0].weight = 0.5
+
+    def mask_first(traj):
+        traj.steps[0].mask()
+
+    def unmask_first(traj):
+        traj.steps[0].masked = False
+
+    use(weigh_first, name="w")
+    use(mask_first, name="m")
+    use(unmask_first, name="u")
+    monkeypatch.setenv("PRL_TRANSFORM", "w+m")  # the weighted turn masked: no stale step_weights left behind
+    kept = _run(_trial())
+    assert kept[1].metadata["prl_transform"]["chain"][-1]["status"] == "ok"
+    assert all("step_weights" not in (s.train_metadata or {}) for s in kept)
+    monkeypatch.setenv("PRL_TRANSFORM", "m+u")  # masked, then unmasked: it trains again
+    kept = _run(_trial())
+    assert kept[1].loss_mask == _trial()[1].loss_mask and kept[1].metadata["prl_transform"]["chain"][-1]["status"] == "ok"
+
+
+def test_weight_text_finds_a_command_as_the_reply_escapes_it():
+    reply = 'run it\n</think>\n\n{"commands": [{"keystrokes": "mkdir -p /output\\n"}]}'
+    traj = Trajectory.of([_sample("TASK", [(reply, 1), ("o1", 0)])], CharTokenizer())
+    step = traj.steps[0]
+    step.weight_text(step.command["commands"][0]["keystrokes"], 0.0)  # "mkdir -p /output\n", decoded
+    assert [reply[a:b] for a, b, _ in step._spans] == ["mkdir -p /output\\n"]

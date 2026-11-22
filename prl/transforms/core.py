@@ -297,10 +297,14 @@ async def run(samples: list[Any], tokenizer: Any, args: Any = None, strict: bool
             samples = original
             entry.update(status="skipped", reason=str(exc), record=traj.record if traj is not None else {})
         except Exception as exc:  # any failure of the user function: the trial trains unchanged
+            if isinstance(exc, (TimeoutError, asyncio.TimeoutError)) and not str(exc):  # distinct before Python 3.11
+                late = TimeoutError(f"{item}: no result after {timeout:.0f} s (PRL_TRANSFORM_TIMEOUT); a synchronous "
+                                    "function keeps its thread until it returns, an async one is cancelled")
+                if strict:
+                    raise late from exc
+                exc = late
             if strict:
                 raise
-            if isinstance(exc, (TimeoutError, asyncio.TimeoutError)):  # distinct classes before Python 3.11
-                exc = TimeoutError(f"no result after {timeout:.0f} s (PRL_TRANSFORM_TIMEOUT)")
             logger.exception("[prl] transform %s failed on %s; trial kept unchanged", item, trial_dir)
             samples = original
             entry.update(status="error", reason=f"{type(exc).__name__}: {exc}"[:2000])

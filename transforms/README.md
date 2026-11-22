@@ -23,7 +23,7 @@ are implemented and have passed the unit tests and a GPU smoke.
 
 | | |
 |---|---|
-| `traj.task` | the task's prompt: the harness's whole first prompt (its instructions, then the task) |
+| `traj.task` | the task's prompt: the harness's whole first prompt (its instructions, then the task), in the model's chat template (`<\|im_start\|>user` ... `<think>`) |
 | `traj.reward` | the test reward (0–1, writable) |
 | `traj.steps` | one `Step` per model turn, in order; `step.index` starts at 0 |
 | `traj.trial_dir` | the trajectory's directory (Harbor's records and the test results are in it) |
@@ -41,7 +41,7 @@ the step: the prompt and the typed command too, so a pattern taken from the comm
 |---|---|
 | `step.mask()` | this step leaves the loss (under PPO the critic does not learn it either) |
 | `step.weight = w` | this step's advantage × w. In GRPO a successful trajectory has A ≥ 0 and a failed one A ≤ 0, so a negative w reverses the direction |
-| `step.weight_text(text, w, every=False)` | only the tokens of this text get w, the rest of the step keeps `step.weight`. `text` must occur exactly once in the step's output (`every=True`: every occurrence). Not in the same call as a rewrite |
+| `step.weight_text(text, w, every=False)` | only the tokens of this text get w, the rest of the step keeps `step.weight`. `text` must occur exactly once in the step's output (`every=True`: every occurrence); a command's keystrokes from `step.command` are found as the reply writes them (JSON-escaped). Not in the same call as a rewrite |
 
 In a chain, a function gets the steps as the one before left them: `step.weight = w` replaces an earlier weight,
 `step.weight *= w` combines with it; `step.masked` tells a masked step.
@@ -67,7 +67,9 @@ In a chain, a function gets the steps as the one before left them: `step.weight 
 `step.reroll(n=1, credit="member", hint=None)`: after your function returns, the framework opens `n` new sandboxes
 (branches) for this step. Each runs the commands before this step for real, in order (the rewritten ones, if there are
 any), then the policy generates from this step on and the tests grade it. All branches run at once. A `hint` is shown to
-the branches' policy at the end of the environment message before this step: part of its prompt, never trained.
+the branches' policy at the end of the environment message before this step: part of its prompt, never trained (the
+reroll agent adds it to the policy's request, so the branch's Harbor `trajectory.json` does not show it;
+`reroll_replay.json` has its length, `hint_chars`).
 
 - A branch's part before this step is context only and does not train; the branch trains with its own reward, scored
   as `credit` says (see [credit](#credit-how-a-new-trajectory-is-scored) below): `member` counts it as one more member
@@ -84,7 +86,7 @@ the branches' policy at the end of the environment message before this step: par
 - Results: one `reroll/s<step>_b<j>/` per branch in the trajectory's directory (the request, the outcome, and
   `reroll_replay.json`: for each replayed turn, whether its terminal output matched the original, with both sides
   when it did not); metrics `rollout/reroll/*` (`requested_trials`, `branches`, `{ok,failed,subgroup}_branches`,
-  `verified_steps`, `confirmed_steps` (a branch scored more than its trial), `reward_mean`, `source_reward_mean`, `seconds_mean`). A branch's own trial directory sits next to the others in
+  `verified_steps`, `confirmed_steps` (a branch scored more than its trial; `subgroup_branches` counts `credit="subgroup"` only), `reward_mean`, `source_reward_mean`, `seconds_mean`). A branch's own trial directory sits next to the others in
   `harbor_trials/` (no `transform.json`; the branch's `outcome.json` names it).
 - The replayed terminal output is real and differs a little from the original (times, inodes, git hashes and the
   like); the framework records this and does not block it.
@@ -111,7 +113,7 @@ k = await ask(prompt, check=fn)     # prompt is a string or a list of messages
 
 | | |
 |---|---|
-| `traj.skip("reason")` | leave this trajectory alone; it trains as it was (not a failure) |
+| `traj.skip("reason")` | give up on this trajectory: it trains as it was, with the reason recorded. Not an error, but it counts toward `PRL_TRANSFORM_MAX_FAILURES` (default 32 trajectories in a row left unchanged stop the run: a model that stays unreachable). To leave a trajectory alone on purpose (e.g. a passed one), just `return traj` |
 | `traj.record["key"] = value` | saved to `<trial_dir>/transform.json` |
 | `traj.add_sample(sample, reward)`, `traj.demonstrate(step, action, reward)` | advanced: build extra training samples yourself |
 
@@ -214,9 +216,11 @@ environment of the shell that submits it, apart from `TRANSFORM` and `PRL_TRANSF
 
 | Name | What it does | Main parameters |
 |---|---|---|
-| `atlas` | a judge picks the critical steps; the others are masked (or scaled by `other_weight`) | `other_weight` |
+| `atlas` | a judge picks the critical steps; the others are masked (or scaled by `other_weight`) | `other_weight`; `select="random"` (no judge: random steps holding `keep_tokens` of the trained tokens, the control for the judge's choice; drawn by `seed` and the name of the trajectory's directory) |
 | `atlas_signed` | a judge marks steps good / bad / neutral; bad steps of successful trajectories are pushed the other way | `mode` (mild / strict), `bad_weight`, `failed_good_weight`, `quote_bad` (push only the span that went wrong) |
 | `rewrite` | a teacher makes small edits; or fixes failures only; or picks a step to branch from | `prompt`, `mask_new`, `successes` / `failures`, `added="reroll"`, limits on how much it may change |
+| `branch` | the branch template (§3) | `select`, `allocate`, `credit`, `min_step`, `max_anchors` |
+| `hint_reroll` | a judge names a failed trajectory's first wrong step (numbered from 1 in its record, as in its prompt) and writes a hint of at most `max_hint_words` (where to look again, no command); the policy tries again from there `n` times with it | `n` (2), `credit` (`verified`), `prompt` (`hint_v2`; `hint_v1` also names the mistake), `max_hint_words` (15), `test_chars` (the end of the trajectory's test output the judge sees; 1500) |
 | `reroll_smoke` | for testing the framework: branches from a middle step | `min_steps`, `edit`, `every` |
 
 Each file's docstring describes all of its parameters.

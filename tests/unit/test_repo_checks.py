@@ -61,6 +61,11 @@ def test_ruff_finds_nothing():
     version = subprocess.run([ruff, "--version"], capture_output=True, text=True, check=False).stdout.split()[-1]
     if version != _pinned_ruff():
         pytest.skip(f"ruff {version}, not the pinned {_pinned_ruff()} (another default rule set)")
-    result = subprocess.run([ruff, "check", "prl", "tests", "scripts", "transforms"], cwd=ROOT,
-                            capture_output=True, text=True, check=False)
+    # The repository's own files only: a user's transforms/<name>.py (untracked) is theirs to lint or not
+    tracked = subprocess.run(["git", "ls-files", "prl", "tests", "scripts", "transforms"], cwd=ROOT,
+                             capture_output=True, text=True, check=False)
+    if tracked.returncode != 0:
+        pytest.skip("not a git checkout")
+    files = [f for f in tracked.stdout.split() if f.endswith(".py") and (ROOT / f).exists()]
+    result = subprocess.run([ruff, "check", *files], cwd=ROOT, capture_output=True, text=True, check=False)
     assert result.returncode == 0, result.stdout

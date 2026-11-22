@@ -6,6 +6,7 @@ import asyncio
 
 import pytest
 
+pytest.importorskip("harbor")  # the Harbor agent (installed on the cluster, see docs/setup.md)
 from prl.rollout.training_terminus import ACTION_TAG, SUMMARY_TAG, Terminus2, TrainingTerminus2
 
 

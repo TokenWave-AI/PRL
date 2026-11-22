@@ -5,9 +5,9 @@ from __future__ import annotations
 
 import asyncio
 
-import numpy as np
 import pytest
 
+np = pytest.importorskip("numpy")
 miles_types = pytest.importorskip("miles.utils.types")
 from prl.rollout import training_samples
 from prl.transforms import core

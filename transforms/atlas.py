@@ -11,7 +11,7 @@ request and answer are in ``<trial_dir>/atlas_labels.json``; the critical steps 
 ones. They hold about ``keep_tokens`` of the trial's trained tokens: the default 0.317 is the share a signed ATLAS run of
 ours kept (its critical steps were 22.8% of the steps), so the control trains as many tokens, not as many steps
 (critical steps are longer than average). The steps are drawn in an order fixed by
-``seed`` and the trial's directory, each taken while it brings the share closer to ``keep_tokens``; the first that
+``seed`` and the trial directory's name, each taken while it brings the share closer to ``keep_tokens``; the first that
 would not ends the draw (no preference for short steps), and at least one step is kept. The metrics are the judge's
 (rollout/atlas/critical_step_frac and kept_token_frac); the record also says ``"select": "random"``.
 """
@@ -19,6 +19,7 @@ would not ends the draw (no preference for short steps), and at least one step i
 from __future__ import annotations
 
 import random
+from pathlib import Path
 
 from prl.algo import labeler
 from prl.transforms import Trajectory
@@ -56,7 +57,8 @@ def _random_steps(traj: Trajectory, keep_tokens: float, seed: int) -> set[int]:
     size = {step.index: step._end - step._start for step in traj.steps}
     order = sorted(size)
     # A str seed is hashed the same way in every process (unlike hash()); the trial directory tells trials apart
-    random.Random(f"{seed}:{traj.trial_dir or traj.task}:{len(order)}").shuffle(order)
+    # the trial directory's name, not its path: the same trial draws the same steps wherever its directory sits
+    random.Random(f"{seed}:{Path(traj.trial_dir).name if traj.trial_dir else traj.task}:{len(order)}").shuffle(order)
     target, kept, total = keep_tokens * sum(size.values()), set(), 0
     for n in order:
         if kept and abs(total + size[n] - target) >= abs(total - target):

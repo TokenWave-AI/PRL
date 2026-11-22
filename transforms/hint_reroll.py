@@ -17,7 +17,7 @@ trial) or its hint is longer than ``max_hint_words`` or reads like a command (ba
 redirections) or spans several lines.
 
 Params: ``n`` (branches, default 2), ``prompt`` (transforms/rewrite_prompts/<prompt>.md, default hint_v2: where to look
-again, not what is wrong; hint_v1 also names the mistake), ``max_hint_words`` (default 15; 25 with v1),
+again, not what is wrong; hint_v1 also names the mistake), ``max_hint_words`` (default 15; with hint_v1 pass 25, the length its prompt was written for),
 ``test_chars`` (default 1500), ``credit`` (default verified; subgroup or member to compare). On 16 failed trials of one of
 our runs both prompts picked the same fork steps. Passed trials, trials split by a summary and trials in which the judge
 finds no step to do better are left as they are. The decision is in ``traj.record["hint_reroll"]``, the judge's calls in ``<trial_dir>/transform_calls.json``.
@@ -25,7 +25,6 @@ finds no step to do better are left as they are. The decision is in ``traj.recor
 
 from __future__ import annotations
 
-import json
 import re
 from pathlib import Path
 from typing import Any
@@ -107,12 +106,8 @@ def parse_answer(content: str, n_steps: int, max_words: int) -> dict[str, Any]:
     """{"step": 2..n_steps, "hint": one short line} or {"step": None, "hint": None}, from the answer's last JSON object;
     raises ValueError (the judge is asked again with the reason) for anything else."""
     content = re.sub(r"<think>.*?</think>", "", content or "", flags=re.DOTALL)
-    for match in reversed(list(re.finditer(r"\{.*\}", content, flags=re.DOTALL))):
-        try:
-            answer = json.loads(match.group(0))
-        except json.JSONDecodeError:
-            continue
-        if not isinstance(answer, dict) or "step" not in answer:
+    for answer in reversed(labeler.json_objects(content)):
+        if "step" not in answer:
             continue
         step, hint = answer["step"], answer.get("hint")
         if step is None:

@@ -180,15 +180,27 @@ def build_prompt(task: str, steps: list[Rendered], reward: float | None, style: 
     return "\n".join(parts)
 
 
+
+def json_objects(content: str) -> list[dict[str, Any]]:
+    """Every JSON object in a model's answer, in order (text around and between them, e.g. "step {3} looked off",
+    is skipped): the parsers take the last one that fits."""
+    decoder, found, i = json.JSONDecoder(), [], content.find("{")
+    while i >= 0:
+        try:
+            value, end = decoder.raw_decode(content, i)
+        except json.JSONDecodeError:
+            i = content.find("{", i + 1)
+            continue
+        if isinstance(value, dict):
+            found.append(value)
+        i = content.find("{", end)
+    return found
+
 def parse_answer(content: str, n_steps: int, cap: int | None = None) -> tuple[list[int], dict[str, str]]:
     """Critical step numbers (1-based, in range, sorted) and reasons, from the judge's last JSON object; more than
     ``cap`` steps is an invalid answer (retried)."""
     content = re.sub(r"<think>.*?</think>", "", content or "", flags=re.DOTALL)
-    for match in reversed(list(re.finditer(r"\{.*\}", content, flags=re.DOTALL))):
-        try:
-            answer = json.loads(match.group(0))
-        except json.JSONDecodeError:
-            continue
+    for answer in reversed(json_objects(content)):
         steps = sorted({int(x) for x in answer.get("critical_steps", []) if 1 <= int(x) <= n_steps})
         if not steps:
             raise ValueError("no critical step in range")
@@ -202,11 +214,7 @@ def parse_grades(content: str, n_steps: int, cap: int) -> tuple[set[int], set[in
     """Good and bad step numbers (1-based, in range) and reasons, from the judge's last JSON object; a step both good and
     bad, or more than ``cap`` good or bad steps, is an invalid answer (retried). No good or bad step is a valid answer."""
     content = re.sub(r"<think>.*?</think>", "", content or "", flags=re.DOTALL)
-    for match in reversed(list(re.finditer(r"\{.*\}", content, flags=re.DOTALL))):
-        try:
-            answer = json.loads(match.group(0))
-        except json.JSONDecodeError:
-            continue
+    for answer in reversed(json_objects(content)):
         if not isinstance(answer, dict) or not {"good", "bad"} <= answer.keys():
             continue
         good, bad = ({int(x) for x in answer[key] if 1 <= int(x) <= n_steps} for key in ("good", "bad"))
@@ -288,11 +296,7 @@ def parse_quotes(content: str) -> dict[int, str]:
     """The quotes of the judge's last JSON object with good and bad (1-based step number -> text); a missing or
     malformed quote is left out (the transform falls back to the whole step)."""
     content = re.sub(r"<think>.*?</think>", "", content or "", flags=re.DOTALL)
-    for match in reversed(list(re.finditer(r"\{.*\}", content, flags=re.DOTALL))):
-        try:
-            answer = json.loads(match.group(0))
-        except json.JSONDecodeError:
-            continue
+    for answer in reversed(json_objects(content)):
         if isinstance(answer, dict) and {"good", "bad"} <= answer.keys():
             quotes = answer.get("quotes") if isinstance(answer.get("quotes"), dict) else {}
             out = {}

@@ -130,3 +130,8 @@ def test_bad_params(args):
     traj = SimpleNamespace(reward=0.0, samples=[], steps=[], record={}, trial_dir=None)
     with pytest.raises(ValueError):
         asyncio.run(module.hint_reroll(traj, **args))
+
+
+def test_the_last_json_object_is_read_past_other_braces():
+    content = 'Step {3} looked off. Answer: {"step": 3, "hint": "Re-read the task."}'
+    assert module.parse_answer(content, 3, 25) == {"step": 3, "hint": "Re-read the task."}

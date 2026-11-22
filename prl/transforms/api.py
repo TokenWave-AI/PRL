@@ -63,6 +63,8 @@ CREDITS = ("member", "subgroup", "verified")  # how a branch trains (prl/algo/ad
 SIBLING_CREDITS = ("subgroup", "verified")  # a branch compared with its siblings only, not a group member
 # A hint is a short note to the policy (the transform keeps it short); this only bounds what reaches its context
 MAX_HINT_CHARS = 2000
+# sample.metadata key: the [start, end) response-token ranges of the turns a transform masked, for the next one of a chain
+MASKED_KEY = "prl_masked_steps"
 
 
 UNREBUILT = ("rollout_sampling_mask", "teacher_log_probs", "opd_reverse_kl", "rollout_routed_experts",
@@ -92,6 +94,7 @@ class Step:
     _end: int = field(default=0, repr=False)
     _original: tuple[str, str] = field(default=("", ""), repr=False)  # (action, observation) as generated
     _spans: list[tuple[int, int, float]] = field(default_factory=list, repr=False)  # (char start, char end, weight)
+    _was_masked: bool = field(default=False, repr=False)  # masked by an earlier function of the chain
 
     def mask(self) -> None:
         self.masked = True
@@ -99,9 +102,13 @@ class Step:
     def weight_text(self, text: str, w: float, every: bool = False) -> None:
         """Token-level weight: the tokens of ``text``, which must occur exactly once in the action as generated (or, with
         ``every``, at least once: then every occurrence), get ``w`` instead of the step's weight (e.g. only the wrong
-        command of a bad step is pushed down, also where the reasoning repeats it)."""
+        command of a bad step is pushed down, also where the reasoning repeats it). A text taken from ``command`` (its
+        keystrokes, decoded) is also found as the reply writes it, JSON-escaped (``\\n`` for a newline)."""
         if (self.action, self.observation) != self._original:
             raise ValueError(f"step {self.index}: weight_text on a rewritten step")
+        escaped = json.dumps(text, ensure_ascii=False)[1:-1] if isinstance(text, str) else text
+        if text and escaped != text and self.action.count(text) == 0 and self.action.count(escaped):
+            text = escaped
         found = self.action.count(text) if text else 0
         if not (found == 1 or (every and found > 1)):
             raise ValueError(f"step {self.index}: {text[:80]!r} must occur {'at least' if every else 'exactly'} once "
@@ -268,17 +275,22 @@ class Trajectory:
         for i in order:
             s = samples[i]
             response = s.tokens[len(s.tokens) - s.response_length:]
-            runs = _runs(list(s.loss_mask))
+            mask = list(s.loss_mask)
             # Weights an earlier transform of the chain set, one per trained run (step_advantage's segmentation)
             weights = iter((getattr(s, "train_metadata", None) or {}).get("step_weights") or [])
-            for k, (trained, start, end) in enumerate(runs):
-                if not trained:
-                    continue
-                following = runs[k + 1] if k + 1 < len(runs) else None
+            # Turns an earlier transform of the chain masked (_apply records them): still steps, with masked=True, so
+            # every function of a chain sees the same turns under the same numbers
+            spans = [(start, end, True) for trained, start, end in _runs(mask) if trained]
+            spans += [(a, b, False) for a, b in (s.metadata or {}).get(MASKED_KEY) or []
+                      if 0 <= a < b <= len(mask) and not any(mask[a:b])]
+            spans.sort()
+            for k, (start, end, trained) in enumerate(spans):
+                following = spans[k + 1][0] if k + 1 < len(spans) else len(response)
                 action = tokenizer.decode(response[start:end])
-                observation = tokenizer.decode(response[following[1]:following[2]]) if following else ""
-                steps.append(Step(len(steps), action, observation, weight=float(next(weights, 1.0)), _sample=i,
-                                  _start=start, _end=end, _original=(action, observation)))
+                observation = tokenizer.decode(response[end:following])
+                steps.append(Step(len(steps), action, observation, weight=float(next(weights, 1.0)) if trained else 1.0,
+                                  masked=not trained, _was_masked=not trained, _sample=i, _start=start, _end=end,
+                                  _original=(action, observation)))
         reward = next((s.metadata["reward"] for s in samples if (s.metadata or {}).get("reward") is not None), None)
         reward = None if reward is None else float(reward)
         trial_dir = next((s.metadata["trial_dir"] for s in samples if (s.metadata or {}).get("trial_dir")), None)
@@ -313,11 +325,20 @@ class Trajectory:
             by_sample.setdefault(step._sample, []).append(step)
             if step.masked:
                 self.samples[step._sample].loss_mask[step._start:step._end] = [0] * (step._end - step._start)
-        if weighted:
-            for i, steps in by_sample.items():
-                sample = self.samples[i]
+            elif step._was_masked:  # an earlier function of the chain masked it, this one unmasked it: it trains again
+                self.samples[step._sample].loss_mask[step._start:step._end] = [1] * (step._end - step._start)
+        for i, steps in by_sample.items():
+            sample = self.samples[i]
+            masked = [[s._start, s._end] for s in steps if s.masked]
+            if masked or (sample.metadata or {}).get(MASKED_KEY):
+                sample.metadata = {**(sample.metadata or {}), MASKED_KEY: masked}
+            if weighted:
                 sample.train_metadata = {**(sample.train_metadata or {}),
                                          "step_weights": [float(s.weight) for s in steps if not s.masked]}
+            elif (sample.train_metadata or {}).get("step_weights"):
+                # every trained step back at 1 (e.g. an earlier function's weighted step now masked): a stale list
+                # would no longer match the trained runs
+                sample.train_metadata = {k: v for k, v in sample.train_metadata.items() if k != "step_weights"}
         for step in spanned:
             if step.masked or step.deleted:
                 raise ValueError(f"step {step.index}: weight_text on a masked or deleted step")
@@ -425,11 +446,21 @@ class Trajectory:
             mask: list[int] = []
             lps: list[float] = []
             new_calls = []
-            owner: Step | None = None  # the turn whose environment message the next untrained run is
+            # The sample as segments: each turn (a trained run, or one an earlier function of the chain masked) and
+            # the untrained run after it, its environment message
+            segments: list[tuple[bool, int, int, Step | None]] = []
+            pos, owner = 0, None
+            for st in sorted(steps, key=lambda st: st._start):
+                if st._start > pos:
+                    segments.append((False, pos, st._start, owner))
+                segments.append((True, st._start, st._end, st))
+                pos, owner = st._end, st
+            if pos < len(response):
+                segments.append((False, pos, len(response), owner))
             k = 0
-            for trained, a, b in _runs(list(s.loss_mask)):
+            for trained, a, b, owner in segments:
                 if trained:
-                    st = owner = steps[k]
+                    st = owner
                     call = calls[k] if calls else None
                     k += 1
                     if st.deleted:

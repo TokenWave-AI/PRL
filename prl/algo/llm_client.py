@@ -53,9 +53,16 @@ def config(prefix: str = JUDGE) -> dict[str, Any]:
     if not isinstance(extra_body, dict):
         raise ValueError(f"{prefix}EXTRA_BODY must be a JSON object")  # noqa: TRY004 -- a config value
     fallbacks = [m.strip() for m in os.getenv(f"{prefix}FALLBACK_MODELS", "").split(",") if m.strip()]
+    missing = [f"{prefix}{k}" for k in ("API_BASE", "MODEL", "KEY_FILE") if not os.getenv(f"{prefix}{k}")]
+    if missing:
+        raise ValueError(f"no model to call: set {', '.join(missing)} (the site profile's judge lines, "
+                         "configs/sites/example.env)")
+    key_file = Path(os.environ[f"{prefix}KEY_FILE"])
+    if not key_file.is_file():
+        raise ValueError(f"{prefix}KEY_FILE: no file {key_file}")
     return {"base": os.environ[f"{prefix}API_BASE"].rstrip("/"), "model": os.environ[f"{prefix}MODEL"],
             "fallback_models": fallbacks,
-            "key": Path(os.environ[f"{prefix}KEY_FILE"]).read_text().strip(),
+            "key": key_file.read_text().strip(),
             "concurrency": int(os.getenv(f"{prefix}CONCURRENCY", "64")),
             "timeout": float(os.getenv(f"{prefix}TIMEOUT", "600")),
             "attempts": int(os.getenv(f"{prefix}ATTEMPTS", "3")),

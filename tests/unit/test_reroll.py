@@ -178,7 +178,7 @@ def test_one_reroll_per_chain(use, monkeypatch):
 # --- the agent -------------------------------------------------------------------------------------------------------
 
 def test_the_agent_replays_the_turns_then_calls_the_policy(tmp_path, monkeypatch):
-    from harbor.llms.chat import Chat
+    Chat = pytest.importorskip("harbor.llms.chat").Chat
 
     from prl.rollout import reroll_agent
     from prl.rollout.training_terminus import TrainingTerminus2
@@ -217,7 +217,7 @@ def test_the_agent_replays_the_turns_then_calls_the_policy(tmp_path, monkeypatch
 
 def test_the_agent_shows_the_hint_with_the_policys_first_message(tmp_path, monkeypatch):
     """The hint ends the message the policy gets first (its prompt, never trained), once, after the comparison."""
-    from harbor.llms.chat import Chat
+    Chat = pytest.importorskip("harbor.llms.chat").Chat
 
     from prl.rollout import reroll_agent
     from prl.rollout.training_terminus import TrainingTerminus2
@@ -243,6 +243,7 @@ def test_the_agent_shows_the_hint_with_the_policys_first_message(tmp_path, monke
 
 def test_the_replay_comparison_ignores_the_host_name_and_blank_lines():
     """In a smoke, a fresh sandbox's host name and tmux's blank lines made 186 of 188 replayed turns 'differ'."""
+    pytest.importorskip("harbor")  # prl.rollout.reroll_agent subclasses Harbor's Terminus-2
     from prl.rollout.reroll_agent import _normal
 
     def screen(host, pad):
@@ -488,3 +489,28 @@ def test_reroll_metrics_count_the_confirmed_verified_steps():
     assert (out["rollout/reroll/verified_steps"], out["rollout/reroll/confirmed_steps"]) == (2, 1)
     assert "rollout/reroll/verified_steps" not in compute(SimpleNamespace(), [
         _metric_sample("c", 0.0, prl_transform={**record, "reroll": [{**branch(1, "ok", 1.0), "credit": "subgroup"}]})])
+
+
+def test_a_reroll_after_an_earlier_function_masked_a_turn_replays_it(monkeypatch):
+    """The chain's second function sees the masked turn as a step: the replay has every turn before the anchor, and
+    the anchor's first token is where the turn really starts (a smoke had replayed one turn of three)."""
+    for key in ("PRL_TRANSFORM_ARGS", "PRL_TRANSFORM_MAX_FAILURES", "PRL_TRANSFORM_TIMEOUT"):
+        monkeypatch.delenv(key, raising=False)
+    monkeypatch.setattr(core, "_failures", 0)
+
+    def mask(traj):
+        traj.steps[1].mask()
+
+    def fork(traj):
+        traj.record["masked"] = [s.masked for s in traj.steps]
+        traj.steps[2].reroll(2, "verified")
+    fns = {"m": mask, "f": fork}
+    monkeypatch.setattr(core, "_resolve", lambda name: fns[name])
+    monkeypatch.setenv("PRL_TRANSFORM", "m+f")
+    alone = _record(_run(_trial()))  # reference: the same reroll without the mask
+    monkeypatch.setenv("PRL_TRANSFORM", "f")
+    reference = _record(_run(_trial()))["reroll"]["anchors"][0]
+    assert alone["chain"][1]["record"]["masked"] == [False, True, False]
+    [request] = alone["reroll"]["anchors"]
+    assert [t["step"] for t in request["turns"]] == [0, 1] and request["step"] == 2
+    assert request["token_start"] == reference["token_start"]

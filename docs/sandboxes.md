@@ -18,10 +18,11 @@ Besides the sandbox endpoint, it reads from the site profile the registry the im
 credentials the service pulls them with (`PRL_REGISTRY_CREDENTIALS_FILE`, `{"username": ..., "password": ...}`,
 chmod 600). The script calls `sudo docker`, so log root's Docker in to that registry (`sudo docker login
 --password-stdin`), or set `PRL_DOCKER_COMMAND="sudo docker --config <dir>"` for a Docker config logged in elsewhere (a directory of
-your own: buildx keeps its current builder there too).
+your own: buildx keeps its current builder there too; to start from an existing config, copy only its `config.json`,
+the rest may belong to root).
 On another machine than the cluster, set `PRL_EXT` to a directory there, with the key files where the profile names them
 (or set `E2B_API_KEY_FILE` and `PRL_REGISTRY_CREDENTIALS_FILE` too), and copy `$PRL_EXT/task_snapshots` to the cluster's
-`PRL_EXT` afterwards. `PRL_SANDBOX_SMOKE_ONLY=1` builds only the 8 tasks of the framework smoke (a few minutes; all 798
+`PRL_EXT` afterwards. `PRL_SANDBOX_SMOKE_ONLY=1` builds only the 8 tasks of the framework smoke (about 10 minutes; all 798
 take hours). It stops at the first task that fails; run it again to go on with the tasks that have no template yet.
 Docker keeps its build cache (`docker builder prune` frees it).
 
@@ -46,7 +47,17 @@ checks that the manifest belongs to the configured `E2B_API_URL`, that the task'
 
 ## Checks
 
-- `python3 scripts/checks/sandbox_smoke.py`: the sandbox contract Harbor relies on (files, exec, tmux), without a model.
+- `scripts/checks/sandbox_smoke.py`: the sandbox contract Harbor relies on (files, exec, tmux), without a model. It
+  needs the e2b SDK (the venv `build_sandboxes.sh` made), the service settings and a template that exists on your
+  service, e.g. one the build registered (its `manifest.json`):
+
+  ```bash
+  set -a; source configs/sites/mysite.env; set +a
+  PRL_SANDBOX_SMOKE_TEMPLATE=<template id> PRL_SANDBOX_SMOKE_OUTPUT=/tmp/sandbox_smoke.json PRL_SANDBOX_SMOKE_HARBOR=0 \
+    $PRL_EXT/sandbox_venv/bin/python scripts/checks/sandbox_smoke.py
+  ```
+
+  (`PRL_SANDBOX_SMOKE_HARBOR=1`, the default, also checks Terminus-2's tmux and needs Harbor importable.)
 - The official solution must score 1 and a no-op agent 0 on each task's template (`scripts/chain/task_smoke.sh`). For the
   smoke's 8 tasks, into `<training snapshot>/contract`: `PRL_SITE=<site> CHAIN=task_check bash scripts/submit.sh` (the
   first framework smoke does it by itself when it was not done); for a whole snapshot:

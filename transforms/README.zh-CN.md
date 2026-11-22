@@ -20,7 +20,7 @@
 
 | | |
 |---|---|
-| `traj.task` | 题目的 prompt：harness 的整段第一条 prompt（先是它的说明，再是题目） |
+| `traj.task` | 题目的 prompt：harness 的整段第一条 prompt（先是它的说明，再是题目），带模型的 chat template（`<\|im_start\|>user` …… `<think>`） |
 | `traj.reward` | 测试分数（0–1，可写） |
 | `traj.steps` | 每轮模型输出一个 `Step`，按顺序；`step.index` 从 0 开始 |
 | `traj.trial_dir` | 这条轨迹的目录（Harbor 的记录、测试结果都在里面） |
@@ -38,7 +38,7 @@ keystrokes 以 `\n` 结尾才执行，`C-c` 这类是按键，空的表示等待
 |---|---|
 | `step.mask()` | 这一步不进 loss（PPO 下 critic 也不学这一步） |
 | `step.weight = w` | 这一步的 advantage × w。GRPO 里成功轨迹 A ≥ 0、失败轨迹 A ≤ 0，所以负的 w 会把方向反过来 |
-| `step.weight_text(text, w, every=False)` | 只有这段文字的 token 用 w，其余用 `step.weight`。`text` 必须在这一步的输出里出现恰好一次（`every=True`：每次出现）。不能和改写用在同一次调用里 |
+| `step.weight_text(text, w, every=False)` | 只有这段文字的 token 用 w，其余用 `step.weight`。`text` 必须在这一步的输出里出现恰好一次（`every=True`：每次出现）；从 `step.command` 取的命令 keystrokes 会按回复里的写法（JSON 转义后）去找。不能和改写用在同一次调用里 |
 
 串联时，后一个函数拿到的是前一个留下的状态：`step.weight = w` 会替换前面的权重，`step.weight *= w` 是叠加；
 `step.masked` 表示这一步已被 mask。
@@ -62,7 +62,8 @@ keystrokes 以 `\n` 结尾才执行，`C-c` 这类是按键，空的表示等待
 
 `step.reroll(n=1, credit="member", hint=None)`：函数返回后，框架为这一步开 `n` 个新沙盒（分支），每个都把这一步之前的命令按顺序真实执行
 一遍（前面有改写的话用改写后的命令），然后策略从这一步接着生成，测试打分。所有分支同时跑。给了 `hint` 时，它接在这一步之前那条
-环境消息的末尾给分支里的策略看：属于 prompt，不训练。
+环境消息的末尾给分支里的策略看：属于 prompt，不训练（是 reroll agent 加进发给策略的请求里的，所以分支的 Harbor
+`trajectory.json` 里看不到；`reroll_replay.json` 记了它的长度 `hint_chars`）。
 
 - 分支在这一步之前的部分只做上下文、不训练；它用自己的分数训练，怎么算由 `credit` 决定（见下面的 [credit](#credit新轨迹怎么算分)）：
   `member` 当作组里多一个成员；`subgroup` 只和同一起点的兄弟比（只支持 GRPO）；`verified` 在 subgroup 的基础上看分支结果定原轨迹前缀
@@ -74,7 +75,7 @@ keystrokes 以 `\n` 结尾才执行，`C-c` 这类是按键，空的表示等待
   `--custom-reward-post-process-path prl.algo.added_rewards.group_rewards`）；快速开始遇到调用 `reroll` 的 transform 会自动选它，
   训练前的检查也会拦下没用它的作业。
 - 结果：轨迹目录下每个分支一个 `reroll/s<步>_b<序号>/`（请求、结果、`reroll_replay.json`：重放的每一轮终端输出和原来是否一致，
-  不一致的把两边的内容也记下来）；指标 `rollout/reroll/*`（`requested_trials`、`branches`、`{ok,failed,subgroup}_branches`、`verified_steps`、`confirmed_steps`（有分支比原轨迹分高）、
+  不一致的把两边的内容也记下来）；指标 `rollout/reroll/*`（`requested_trials`、`branches`、`{ok,failed,subgroup}_branches`、`verified_steps`、`confirmed_steps`（有分支比原轨迹分高；`subgroup_branches` 只数 `credit="subgroup"`）、
   `reward_mean`、`source_reward_mean`、`seconds_mean`）。分支自己的 trial 目录和其它 trial 并列在 `harbor_trials/` 下
   （没有 `transform.json`；分支的 `outcome.json` 里写着它）。
 - 重放的终端输出是真实的，和原轨迹会有少量差别（时间、inode、git hash 这类）；框架记录、不拦截。
@@ -97,7 +98,7 @@ k = await ask(prompt, check=fn)     # prompt 是字符串或 messages 列表
 
 | | |
 |---|---|
-| `traj.skip("原因")` | 这条不处理，照原样训练（不算失败） |
+| `traj.skip("原因")` | 这条做不了：照原样训练，记下原因。不算出错，但计入 `PRL_TRANSFORM_MAX_FAILURES`（默认连续 32 条没改动就停掉训练：模型一直连不上的情况）。有意不处理的轨迹（比如成功的）直接 `return traj` |
 | `traj.record["key"] = 值` | 存进 `<trial_dir>/transform.json` |
 | `traj.add_sample(sample, reward)`、`traj.demonstrate(step, action, reward)` | 高级：自己构造额外的训练样本 |
 
@@ -193,9 +194,11 @@ TRANSFORM=branch PRL_TRANSFORM_ARGS='{"select": "first_bad", "allocate": {"name"
 
 | 名字 | 做什么 | 主要参数 |
 |---|---|---|
-| `atlas` | 判官选关键步，其余 mask（或乘 `other_weight`） | `other_weight` |
+| `atlas` | 判官选关键步，其余 mask（或乘 `other_weight`） | `other_weight`；`select="random"`（不用判官：随机选占 `keep_tokens` 比例训练 token 的步骤，做判官选择的对照；按 `seed` 和轨迹目录的名字抽） |
 | `atlas_signed` | 判官分好 / 坏 / 一般；成功轨迹的坏步反着推 | `mode`（mild / strict）、`bad_weight`、`failed_good_weight`、`quote_bad`（只推出错的那段） |
 | `rewrite` | 教师小改轨迹；或只修失败的；或选点分支 | `prompt`、`mask_new`、`successes` / `failures`、`added="reroll"`、各种改动比例上限 |
+| `branch` | 分支模板（§3） | `select`、`allocate`、`credit`、`min_step`、`max_anchors` |
+| `hint_reroll` | 判官找失败轨迹第一个走错的步骤（记录里从 1 数，和它的 prompt 一致），写一句不超过 `max_hint_words` 词的提示（只说回头看哪里，不给命令）；策略带着提示从那里再试 `n` 次 | `n`（2）、`credit`（`verified`）、`prompt`（`hint_v2`；`hint_v1` 还会点出错在哪）、`max_hint_words`（15）、`test_chars`（判官能看到的测试输出末尾，1500） |
 | `reroll_smoke` | 测框架用：从中间一步分支 | `min_steps`、`edit`、`every` |
 
 参数的完整说明在各文件开头的 docstring。

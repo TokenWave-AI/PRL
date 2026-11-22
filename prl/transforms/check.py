@@ -99,6 +99,8 @@ async def check(tokenizer: Any, fixture: Path, out: Path, timeout: float, args: 
             kept = await asyncio.wait_for(core.run(samples(trial, tokenizer, str(trial_dir)), tokenizer, args,
                                                    strict=True), timeout)
         except Exception as exc:
+            if isinstance(exc, (TimeoutError, asyncio.TimeoutError)) and not str(exc):
+                exc = TimeoutError(f"no result after {timeout:.0f} s (the check's limit per trial)")
             raise CheckFailed(f"transform {spec} failed on recorded trial {about}: {type(exc).__name__}: {exc}") from exc
         record = kept[0].metadata["prl_transform"]
         return {"trial": trial["name"], "reward": trial["reward"], "steps": steps,
@@ -109,7 +111,9 @@ async def check(tokenizer: Any, fixture: Path, out: Path, timeout: float, args: 
 
     results = await asyncio.gather(*(one(trial) for trial in trials))
     if all("skipped" in r["status"] for r in results):
-        raise CheckFailed(f"transform {spec} skipped all {len(results)} recorded trials (see {out}/*/transform.json)")
+        reasons = sorted({reason for r in results for reason in r["skipped"] if reason})
+        raise CheckFailed(f"transform {spec} skipped all {len(results)} recorded trials (see {out}/*/transform.json); "
+                          f"why: {'; '.join(reasons[:3])[:600] or 'no reason given'}")
     summary = {"transform": spec, "params": [core.effective_params(fn, params) for _, fn, params in chain],
                "fixture": str(fixture),
                "trials": results}
@@ -127,6 +131,14 @@ def main() -> int:
     if not chain:
         print("[transform check] no trajectory transform selected; nothing to check", flush=True)
         return 0
+    missing = [k for k in ("MODEL_HF_DIR",) if not os.getenv(k)]
+    if not (os.getenv("PRL_TRANSFORM_CHECK_OUT") or os.getenv("RUN_DIR")):
+        missing.append("PRL_TRANSFORM_CHECK_OUT")
+    if missing:
+        print(f"[transform check] FAILED: set {' and '.join(missing)} (MODEL_HF_DIR: a directory with the model's "
+              "tokenizer; PRL_TRANSFORM_CHECK_OUT: where the records go; README Quick start, step 2)",
+              file=sys.stderr, flush=True)
+        return 1
     out = Path(os.getenv("PRL_TRANSFORM_CHECK_OUT") or Path(os.environ["RUN_DIR"]) / "transform_check")
     out.mkdir(parents=True, exist_ok=True)
     extra = os.getenv("EXTRA_ARGS", "").split()

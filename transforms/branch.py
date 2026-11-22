@@ -131,7 +131,10 @@ async def branch(traj: Trajectory, select: Any = "middle", allocate: Any = "fixe
     if len(traj.samples) > 1:
         record["why"] = "split by a summary"
         return traj
-    picked = await _call(s_fn, traj, **s_params)
+    # A selection that ranks (``top``) ranks every step: the steps before min_step drop out first, then the top are taken
+    ranks = inspect.signature(s_fn).parameters
+    top = s_params.get("top", ranks["top"].default) if "top" in ranks else None
+    picked = await _call(s_fn, traj, **({**s_params, "top": len(traj.steps)} if top is not None else s_params))
     if traj.skipped is not None:
         return traj
     anchors: list[Step] = []
@@ -139,7 +142,7 @@ async def branch(traj: Trajectory, select: Any = "middle", allocate: Any = "fixe
         step = _step(traj, x[0] if isinstance(x, tuple) else x)
         if step.index >= min_step and not any(step is a for a in anchors):
             anchors.append(step)
-    anchors = anchors[:max_anchors]
+    anchors = anchors[:max_anchors if top is None else min(max_anchors, top)]
     plan = await _call(a_fn, traj, anchors, **a_params)
     record["anchors"] = []
     for step, n in plan:

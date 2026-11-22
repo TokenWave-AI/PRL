@@ -10,6 +10,7 @@ import types
 
 import pytest
 
+pytest.importorskip("harbor")  # prl.rollout.harbor_agent (installed on the cluster, see docs/setup.md)
 from prl.sandbox.template_manifest import context_hash, context_inventory
 
 
