@@ -22,7 +22,7 @@ Configuration:
     PRL_ABORT_MAX_RETRIES: extra attempts of an aborted training trial (same prompt, fresh session, shifted
         seed), default 2; 0 restores the whole-group refill on the first abort.
     PRL_EVAL_SANDBOX_RETRIES: extra attempts of an evaluation trial that failed on the sandbox service, default 0
-        (it scores 0, comparable with every earlier evaluation); scripts/tools/tbdev_score.py --samples then drops the
+        (it scores 0, as Harbor's and TB-dev's own scoring do; the TB-dev eval arms set 2); scripts/tools/tbdev_score.py --samples then drops the
         failed attempts from the score.
         Kept samples carry metadata["prl_abort_retries"] (rollout/abort_retried_trials). An aborted reroll branch
         is run again as often (its outcome's "attempts").
