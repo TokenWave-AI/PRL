@@ -10,7 +10,7 @@ runs on the session server's event loop and must not wait on the network.
 
 Configuration: the judge profile of prl/algo/llm_client.py (PRL_JUDGE_API_BASE, _KEY_FILE, _MODEL,
 _EXTRA_BODY, _CONCURRENCY, _TIMEOUT, _ATTEMPTS, _MAX_TOKENS), and
-    PRL_JUDGE_PROMPT     ``paper`` (default): ATLAS' selection prompt (Chen et al., ACL Findings 2025, arXiv
+    PRL_JUDGE_PROMPT     ``paper`` (default): ATLAS' selection prompt (ATLaS, Chen et al., ACL 2025, arXiv
                                2503.02197, appendix D.1) with the RL changes marked in PAPER_INSTRUCTIONS;
                                ``short``: an earlier, shorter prompt of our own (not the paper's)
 A trial whose labeling fails (HTTP error, unparsable answer, no step marked) is skipped by the atlas transform; the

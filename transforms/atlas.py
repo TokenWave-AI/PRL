@@ -1,4 +1,4 @@
-"""ATLAS (Chen et al., ACL Findings 2025, arXiv 2503.02197) as a trajectory transform: PRL_TRANSFORM=atlas.
+"""ATLAS (ATLaS: Agent Tuning via Learning Critical Steps, Chen et al., ACL 2025, arXiv 2503.02197) as a trajectory transform: PRL_TRANSFORM=atlas.
 
 A judge model marks the trial's critical steps (prl/algo/labeler.py, configured by PRL_JUDGE_*). The other
 steps leave the loss (``other_weight`` 0, the default: hard mask) or have their advantage scaled by ``other_weight``

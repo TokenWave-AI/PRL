@@ -29,7 +29,7 @@
 
 ## 例：ATLAS
 
-ATLAS（Chen et al. 2025）：判官从轨迹里挑出关键步，只学关键步，其余步不学：
+[ATLaS](https://arxiv.org/abs/2503.02197)（*Agent Tuning via Learning Critical Steps*，Chen et al. 2025）：判官从轨迹里挑出关键步，只学关键步，其余步不学：
 
 ```python
 # transforms/atlas.py   运行时：TRANSFORM=atlas
@@ -314,7 +314,7 @@ TRANSFORM=branch PRL_TRANSFORM_ARGS='{
 ## 致谢
 
 本项目建立在以下工作之上：Miles 和 slime（训练框架），SGLang（rollout），Megatron-LM（训练），Harbor / Terminus-2（agent 与评测环境），
-E2B（沙盒），LiteLLM（Harbor 调模型），以及 ATLAS（Chen et al. 2025）。
+E2B（沙盒），LiteLLM（Harbor 调模型），以及 [ATLaS](https://arxiv.org/abs/2503.02197)（Chen et al. 2025）。
 
 ## 许可
 

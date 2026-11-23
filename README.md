@@ -29,7 +29,7 @@ However complex the operation on a trajectory, it can be written as one such fun
 
 ## Example: ATLAS
 
-ATLAS (Chen et al. 2025): a judge picks the critical steps of a trajectory; only those train, the others do not:
+[ATLaS](https://arxiv.org/abs/2503.02197) (*Agent Tuning via Learning Critical Steps*, Chen et al. 2025): a judge picks the critical steps of a trajectory; only those train, the others do not:
 
 ```python
 # transforms/atlas.py   at run time: TRANSFORM=atlas
@@ -314,7 +314,7 @@ What each option means: [`transforms/README.md`](transforms/README.md#3-branch-t
 ## Acknowledgements
 
 PRL builds on Miles and slime (training framework), SGLang (rollout), Megatron-LM (training), Harbor / Terminus-2 (agent and evaluation environment),
-E2B (sandboxes), LiteLLM (Harbor's model calls), and ATLAS (Chen et al. 2025).
+E2B (sandboxes), LiteLLM (Harbor's model calls), and [ATLaS](https://arxiv.org/abs/2503.02197) (Chen et al. 2025).
 
 ## License
 
