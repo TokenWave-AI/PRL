@@ -1,30 +1,25 @@
 WEBVTT
 
-00:00:00.000 --> 00:00:06.204
-The tests pass, but one step only repeated a failed command.
+00:00:11.414 --> 00:00:16.587
+Reweight: a judge picks the steps that train.
 
-00:00:06.204 --> 00:00:12.057
-PRL puts a Python function between rollout and the policy
-update.
+00:00:16.587 --> 00:00:20.725
+Reweight: reasoning tokens count half.
 
-00:00:12.057 --> 00:00:14.984
-Your idea goes into one function. PRL calls it on every finished
-trajectory.
+00:00:20.725 --> 00:00:24.863
+Rewrite: fix a step's reasoning.
 
-00:00:14.984 --> 00:00:26.691
-Reweight: decide how much each step, or its reasoning, trains. A
-judge can pick the steps.
+00:00:24.863 --> 00:00:27.966
+Rewrite: the new text stays context only.
 
-00:00:26.691 --> 00:00:35.472
-Rewrite: edit what a step says. The new text can stay context
-only, out of the loss.
+00:00:27.966 --> 00:00:32.104
+Reroll: try again from step 3.
 
-00:00:35.472 --> 00:00:47.179
-Reroll: let the policy try again from a step. The new samples
-are scored by the tests.
+00:00:32.104 --> 00:00:37.276
+Reroll: four tries from the first error, compared with each other.
 
-00:00:47.179 --> 00:00:55.960
-Mix all three in one function, or chain ready transforms.
+00:00:37.276 --> 00:00:43.483
+Combine all three in one function.
 
-00:00:55.960 --> 00:01:02.000
-Start with a transform: github.com/TokenWave-AI/PRL
+00:00:43.483 --> 00:00:47.883
+github.com/TokenWave-AI/PRL
