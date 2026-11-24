@@ -29,7 +29,7 @@
 
 ## 例：ATLAS
 
-[ATLaS](https://arxiv.org/abs/2503.02197)（*Agent Tuning via Learning Critical Steps*，Chen et al. 2025）：判官从轨迹里挑出关键步，只学关键步，其余步不学：
+[ATLaS: Agent Tuning via Learning Critical Steps](https://arxiv.org/abs/2503.02197)（Chen et al.，ACL 2025）：判官从轨迹里挑出关键步，只学关键步，其余步不学：
 
 ```python
 # transforms/atlas.py   运行时：TRANSFORM=atlas
@@ -309,12 +309,35 @@ TRANSFORM=branch PRL_TRANSFORM_ARGS='{
 
 选项具体含义见 [`transforms/README.zh-CN.md`](transforms/README.zh-CN.md#3-分支模板)。
 
-<!-- 论文公开后补"引用"一节。 -->
+## 引用
+
+如果用到 PRL，请引用（GitHub 上的 "Cite this repository" 按钮读的是 [`CITATION.cff`](CITATION.cff) 里的同一份信息）：
+
+```bibtex
+@misc{prl2026,
+  title        = {{PRL}: Programmable Reinforcement Learning for Agents},
+  author       = {{TokenWave AI}},
+  year         = {2026},
+  howpublished = {\url{https://github.com/TokenWave-AI/PRL}}
+}
+```
+
+`atlas` 和 `atlas_signed` 两个 transform 沿用 ATLaS 的方法；用到它们时，也请引用：
+
+```bibtex
+@inproceedings{chen2025atlas,
+  title     = {{ATLaS}: Agent Tuning via Learning Critical Steps},
+  author    = {Chen, Zhixun and Li, Ming and Huang, Yuxuan and Du, Yali and Fang, Meng and Zhou, Tianyi},
+  booktitle = {Proceedings of the 63rd Annual Meeting of the Association for Computational Linguistics (ACL)},
+  year      = {2025},
+  url       = {https://arxiv.org/abs/2503.02197}
+}
+```
 
 ## 致谢
 
 本项目建立在以下工作之上：Miles 和 slime（训练框架），SGLang（rollout），Megatron-LM（训练），Harbor / Terminus-2（agent 与评测环境），
-E2B（沙盒），LiteLLM（Harbor 调模型），以及 [ATLaS](https://arxiv.org/abs/2503.02197)（Chen et al. 2025）。
+E2B（沙盒），LiteLLM（Harbor 调模型），以及 [ATLaS: Agent Tuning via Learning Critical Steps](https://arxiv.org/abs/2503.02197)（Chen et al.，ACL 2025）。
 
 ## 许可
 

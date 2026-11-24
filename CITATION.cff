@@ -1,0 +1,35 @@
+cff-version: 1.2.0
+message: "If you use PRL, please cite it as below."
+type: software
+title: "PRL: Programmable Reinforcement Learning for Agents"
+authors:
+  - name: "TokenWave AI"
+repository-code: "https://github.com/TokenWave-AI/PRL"
+url: "https://github.com/TokenWave-AI/PRL"
+license: Apache-2.0
+version: 0.1.0
+date-released: 2026-11-17
+keywords:
+  - reinforcement learning
+  - LLM agents
+  - GRPO
+references:
+  - type: conference-paper
+    title: "ATLaS: Agent Tuning via Learning Critical Steps"
+    authors:
+      - family-names: Chen
+        given-names: Zhixun
+      - family-names: Li
+        given-names: Ming
+      - family-names: Huang
+        given-names: Yuxuan
+      - family-names: Du
+        given-names: Yali
+      - family-names: Fang
+        given-names: Meng
+      - family-names: Zhou
+        given-names: Tianyi
+    year: 2025
+    conference:
+      name: "63rd Annual Meeting of the Association for Computational Linguistics (ACL 2025)"
+    url: "https://arxiv.org/abs/2503.02197"

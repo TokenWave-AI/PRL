@@ -29,7 +29,7 @@ However complex the operation on a trajectory, it can be written as one such fun
 
 ## Example: ATLAS
 
-[ATLaS](https://arxiv.org/abs/2503.02197) (*Agent Tuning via Learning Critical Steps*, Chen et al. 2025): a judge picks the critical steps of a trajectory; only those train, the others do not:
+[ATLaS: Agent Tuning via Learning Critical Steps](https://arxiv.org/abs/2503.02197) (Chen et al., ACL 2025): a judge picks the critical steps of a trajectory; only those train, the others do not:
 
 ```python
 # transforms/atlas.py   at run time: TRANSFORM=atlas
@@ -309,12 +309,35 @@ TRANSFORM=branch PRL_TRANSFORM_ARGS='{
 
 What each option means: [`transforms/README.md`](transforms/README.md#3-branch-template).
 
-<!-- A Citation section follows once the paper is public. -->
+## Citation
+
+If you use PRL, please cite it (GitHub's "Cite this repository" button reads the same record from [`CITATION.cff`](CITATION.cff)):
+
+```bibtex
+@misc{prl2026,
+  title        = {{PRL}: Programmable Reinforcement Learning for Agents},
+  author       = {{TokenWave AI}},
+  year         = {2026},
+  howpublished = {\url{https://github.com/TokenWave-AI/PRL}}
+}
+```
+
+The `atlas` and `atlas_signed` transforms follow ATLaS; if you use them, please also cite:
+
+```bibtex
+@inproceedings{chen2025atlas,
+  title     = {{ATLaS}: Agent Tuning via Learning Critical Steps},
+  author    = {Chen, Zhixun and Li, Ming and Huang, Yuxuan and Du, Yali and Fang, Meng and Zhou, Tianyi},
+  booktitle = {Proceedings of the 63rd Annual Meeting of the Association for Computational Linguistics (ACL)},
+  year      = {2025},
+  url       = {https://arxiv.org/abs/2503.02197}
+}
+```
 
 ## Acknowledgements
 
 PRL builds on Miles and slime (training framework), SGLang (rollout), Megatron-LM (training), Harbor / Terminus-2 (agent and evaluation environment),
-E2B (sandboxes), LiteLLM (Harbor's model calls), and [ATLaS](https://arxiv.org/abs/2503.02197) (Chen et al. 2025).
+E2B (sandboxes), LiteLLM (Harbor's model calls), and [ATLaS: Agent Tuning via Learning Critical Steps](https://arxiv.org/abs/2503.02197) (Chen et al., ACL 2025).
 
 ## License
 
