@@ -3,7 +3,30 @@ message: "If you use PRL, please cite it as below."
 type: software
 title: "PRL: Programmable Reinforcement Learning for Agents"
 authors:
-  - name: "TokenWave AI"
+  - family-names: Yu
+    given-names: Kefan
+  - family-names: Liu
+    given-names: Jiarui
+  - family-names: Zeng
+    given-names: Qingcheng
+  - family-names: Wang
+    given-names: Yaqian
+  - family-names: Qi
+    given-names: Heli
+  - family-names: Zhao
+    given-names: Enduo
+  - family-names: Huang
+    given-names: Stephen
+  - family-names: Cheung
+    given-names: Eli
+  - family-names: Liu
+    given-names: Qian
+  - family-names: Zheng
+    given-names: Yaowei
+  - family-names: Zhao
+    given-names: Chenyang
+  - family-names: Xuan
+    given-names: Weihao
 repository-code: "https://github.com/TokenWave-AI/PRL"
 url: "https://github.com/TokenWave-AI/PRL"
 license: Apache-2.0

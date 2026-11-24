@@ -312,12 +312,17 @@ What each option means: [`transforms/README.md`](transforms/README.md#3-branch-t
 
 ## Citation
 
+**Authors:** Kefan Yu\*, Jiarui Liu\*, Qingcheng Zeng, Yaqian Wang, Heli Qi, Enduo Zhao, Stephen Huang, Eli Cheung, Qian Liu, Yaowei Zheng, Chenyang Zhao, Weihao Xuan (\* equal contribution)
+
 If you use PRL, please cite it (GitHub's "Cite this repository" button reads the same record from [`CITATION.cff`](CITATION.cff)):
 
 ```bibtex
 @misc{prl2026,
   title        = {{PRL}: Programmable Reinforcement Learning for Agents},
-  author       = {{TokenWave AI}},
+  author       = {Yu, Kefan and Liu, Jiarui and Zeng, Qingcheng and
+                  Wang, Yaqian and Qi, Heli and Zhao, Enduo and
+                  Huang, Stephen and Cheung, Eli and Liu, Qian and
+                  Zheng, Yaowei and Zhao, Chenyang and Xuan, Weihao},
   year         = {2026},
   howpublished = {\url{https://github.com/TokenWave-AI/PRL}}
 }

@@ -312,12 +312,17 @@ TRANSFORM=branch PRL_TRANSFORM_ARGS='{
 
 ## 引用
 
+**作者：** Kefan Yu\*, Jiarui Liu\*, Qingcheng Zeng, Yaqian Wang, Heli Qi, Enduo Zhao, Stephen Huang, Eli Cheung, Qian Liu, Yaowei Zheng, Chenyang Zhao, Weihao Xuan（\* 共同第一作者）
+
 如果用到 PRL，请引用（GitHub 上的 "Cite this repository" 按钮读的是 [`CITATION.cff`](CITATION.cff) 里的同一份信息）：
 
 ```bibtex
 @misc{prl2026,
   title        = {{PRL}: Programmable Reinforcement Learning for Agents},
-  author       = {{TokenWave AI}},
+  author       = {Yu, Kefan and Liu, Jiarui and Zeng, Qingcheng and
+                  Wang, Yaqian and Qi, Heli and Zhao, Enduo and
+                  Huang, Stephen and Cheung, Eli and Liu, Qian and
+                  Zheng, Yaowei and Zhao, Chenyang and Xuan, Weihao},
   year         = {2026},
   howpublished = {\url{https://github.com/TokenWave-AI/PRL}}
 }
