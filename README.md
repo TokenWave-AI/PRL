@@ -2,8 +2,8 @@
 
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="assets/brand/tokenwave-llamafactory-dark.png">
-    <img src="assets/brand/tokenwave-llamafactory.png" alt="TokenWave × LlamaFactory" height="44">
+    <source media="(prefers-color-scheme: dark)" srcset="assets/brand/tokenwave-llamafactory-radixark-dark.png">
+    <img src="assets/brand/tokenwave-llamafactory-radixark.png" alt="TokenWave · LlamaFactory · RadixArk" height="44">
   </picture>
 </p>
 
@@ -322,7 +322,7 @@ PRL is released under the [Apache License 2.0](LICENSE), as Miles is. The upstre
 
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="assets/brand/tokenwave-llamafactory-dark.png">
-    <img src="assets/brand/tokenwave-llamafactory.png" alt="TokenWave × LlamaFactory" height="28">
+    <source media="(prefers-color-scheme: dark)" srcset="assets/brand/tokenwave-llamafactory-radixark-dark.png">
+    <img src="assets/brand/tokenwave-llamafactory-radixark.png" alt="TokenWave · LlamaFactory · RadixArk" height="28">
   </picture>
 </p>
