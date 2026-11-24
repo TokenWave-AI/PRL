@@ -1,10 +1,11 @@
 <p align="right"><a href="README.md">English</a> · <b>中文</b></p>
 
 <p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="assets/brand/tokenwave-llamafactory-radixark-dark.png">
-    <img src="assets/brand/tokenwave-llamafactory-radixark.png" alt="TokenWave · LlamaFactory · RadixArk" height="44">
-  </picture>
+  <a href="https://github.com/TokenWave-AI"><img src="assets/brand/logo-tokenwave.png" alt="TokenWave" height="44"></a>
+  &nbsp;&nbsp;
+  <a href="https://github.com/hiyouga/LlamaFactory"><img src="assets/brand/logo-llamafactory.png" alt="LlamaFactory" height="44"></a>
+  &nbsp;&nbsp;
+  <a href="https://radixark.com/"><img src="assets/brand/logo-radixark.png" alt="RadixArk" height="44"></a>
 </p>
 
 # PRL: Programmable Reinforcement Learning for Agents
@@ -344,8 +345,9 @@ E2B（沙盒），LiteLLM（Harbor 调模型），以及 [ATLaS: Agent Tuning vi
 PRL 以 [Apache License 2.0](LICENSE) 发布，与 Miles 相同。`third_party/` 里的上游代码沿用各自的许可。
 
 <p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="assets/brand/tokenwave-llamafactory-radixark-dark.png">
-    <img src="assets/brand/tokenwave-llamafactory-radixark.png" alt="TokenWave · LlamaFactory · RadixArk" height="28">
-  </picture>
+  <a href="https://github.com/TokenWave-AI"><img src="assets/brand/logo-tokenwave.png" alt="TokenWave" height="28"></a>
+  &nbsp;
+  <a href="https://github.com/hiyouga/LlamaFactory"><img src="assets/brand/logo-llamafactory.png" alt="LlamaFactory" height="28"></a>
+  &nbsp;
+  <a href="https://radixark.com/"><img src="assets/brand/logo-radixark.png" alt="RadixArk" height="28"></a>
 </p>
