@@ -211,6 +211,19 @@ from the critic).
 | Records | `transform.json` per trajectory: each function's status, time and params (defaults included), the steps it changed (`weighted_steps` {step: new weight}, `masked_steps`, `token_weighted_steps`, `rewritten_steps`, `deleted_steps`, `reroll_steps`), the reward before / after, the trainable tokens before / after; matching `rollout/*` metrics in the training log |
 | Framework smoke | needed once after the framework code changes (two updates, about half an hour); it writes a receipt, and training jobs find the receipt that matches the current code |
 
+### Checking a function offline
+
+`python -m prl.transforms.check` (README ②) runs the selected function on the 8 recorded trajectories:
+
+- The terminal shows one line per trajectory: `[transform check] <trajectory>: reward <reward>, <steps> steps, <status>, steps changed: <e.g. 5 weighted, 2 masked>, trained tokens <before> -> <after>, <seconds> s`,
+  where the status is `ok` or `skipped` (a skipped line ends with the reason). The framework's own `[prl]` lines and, with a judge, its HTTP requests are printed as well. The last line is `passed`, or `FAILED` with the trajectory and the reason.
+- The output directory (please use an empty one) has one subdirectory per trajectory: `transform.json` is the framework's record (each function's status and time, what you wrote into `traj.record`,
+  the steps it changed, e.g. `weighted_steps` {step: new weight}, the trainable tokens before / after) and `transform_calls.json` every `ask` request and answer (the ATLAS judge's: `atlas_labels.json`); `summary.json` sums up all 8.
+- The step lists count from 0, as `step.index`; the judges' own numbers (ATLAS' `critical`, `good` / `bad`, `atlas_labels.json`; `hint_reroll`'s `step`) count from 1, as in their prompts.
+- The recorded trajectories have no rollout log probs (`surprisal` sees all 0) and no test output (`hint_reroll`'s judge sees none), so such choices show in training only. To check on your own trajectories, `scripts/tools/make_transform_fixture.py` makes a fixture from a run's `traces/rollout_data/<update>.pt`, and `PRL_TRANSFORM_FIXTURE=<it>` selects it.
+- A reroll is only recorded here (`reroll` in `transform.json`: the steps and the turns to replay); its branches run in training, where the quick start picks the arm a reroll needs by itself.
+- The quick start's default, to check it the same way: `PRL_TRANSFORM=atlas_signed PRL_TRANSFORM_ARGS='{"failed_good_weight": 0.0}'`. A training arm may set more judge settings than the site profile (signed ATLAS: `PRL_JUDGE_EXTRA_BODY='{"reasoning_effort": "low"}'`); please set them here too. On another machine than the cluster, also `export PRL_JUDGE_KEY_FILE=<the key file there>`.
+
 ## 5. Settings
 
 In a job, set them in the site profile (`configs/sites/<site>.env`) or an arm: the job does not see the

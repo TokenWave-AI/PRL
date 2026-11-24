@@ -183,6 +183,19 @@ TRANSFORM=branch PRL_TRANSFORM_ARGS='{"select": "first_bad", "allocate": {"name"
 | 记录 | 每条轨迹 `transform.json`：每个函数的状态、用时、参数（含默认值）、改了哪些步（`weighted_steps` {步骤: 新权重}、`masked_steps`、`token_weighted_steps`、`rewritten_steps`、`deleted_steps`、`reroll_steps`）、分数前后、可训练 token 前后；训练日志里有对应的 `rollout/*` 指标 |
 | 框架烟测 | 框架代码变了以后要跑一次（两次更新，约半小时），生成收据；训练作业自动找匹配当前代码的收据 |
 
+### 离线检查一个函数
+
+`python -m prl.transforms.check`（README ②）会在 8 条录好的轨迹上运行选定的函数：
+
+- 终端里每条轨迹一行：`[transform check] <轨迹>: reward <分数>, <步数> steps, <状态>, steps changed: <如 5 weighted, 2 masked>, trained tokens <改前> -> <改后>, <秒数> s`，
+  状态是 `ok` 或 `skipped`（skipped 的行末尾写着原因）；框架自己的 `[prl]` 日志行和问判官时的 HTTP 请求也会打印出来。最后一行是 `passed` 为通过；出错时打印 `FAILED`、出错的轨迹和原因。
+- 输出目录（请用空目录）里每条轨迹一个子目录：`transform.json` 是框架的记录（每个函数的状态和用时、你写进 `traj.record` 的内容、
+  改了哪些步骤，如 `weighted_steps` {步骤: 新权重}、可训练 token 改前 / 改后的数量），`transform_calls.json` 是每次 `ask` 的请求和回答（ATLAS 判官的在 `atlas_labels.json`）；`summary.json` 汇总全部 8 条。
+- 步骤列表从 0 数，和 `step.index` 一样；判官自己的编号（ATLAS 的 `critical`、`good` / `bad`、`atlas_labels.json`；`hint_reroll` 的 `step`）和它们的 prompt 一样从 1 数。
+- 录好的轨迹没有 rollout log prob（`surprisal` 看到的都是 0），也没有测试输出（`hint_reroll` 的判官看不到）：这类选择只在训练里看得出来。用自己的轨迹：`scripts/tools/make_transform_fixture.py` 从一次运行的 `traces/rollout_data/<update>.pt` 做 fixture，`PRL_TRANSFORM_FIXTURE=<它>` 就在它上面检查。
+- reroll 在这里只记录请求（`transform.json` 的 `reroll`：从哪些步分支、要重放哪些轮），分支在训练时才真正跑；训练时快速开始会自动选 reroll 需要的 arm。
+- 想按快速开始的默认设置来检查：`PRL_TRANSFORM=atlas_signed PRL_TRANSFORM_ARGS='{"failed_good_weight": 0.0}'`。训练 arm 可能比站点配置多设一些判官参数（signed ATLAS：`PRL_JUDGE_EXTRA_BODY='{"reasoning_effort": "low"}'`），检查时请一并设上；不在集群上运行时，还要 `export PRL_JUDGE_KEY_FILE=<本机的 key 文件>`。
+
 ## 5. 配置
 
 作业里的设置写在站点配置（`configs/sites/<site>.env`）或 arm 里：作业看不到提交它的 shell 里的环境变量，

@@ -1,7 +1,7 @@
 <p align="right"><a href="README.md">English</a> · <b>中文</b></p>
 
 <p align="center">
-  <a href="https://github.com/TokenWave-AI"><img src="assets/brand/logo-tokenwave.png" alt="TokenWave" height="44"></a>
+  <a href="https://tokenwave.ai/"><img src="assets/brand/logo-tokenwave.png" alt="TokenWave" height="44"></a>
   &nbsp;&nbsp;
   <a href="https://github.com/hiyouga/LlamaFactory"><img src="assets/brand/logo-llamafactory.png" alt="LlamaFactory" height="44"></a>
   &nbsp;&nbsp;
@@ -105,7 +105,7 @@ PRL_SITE=mysite TRANSFORM=atlas bash scripts/quickstart.sh
 | 从这一步开始让策略再跑 n 次 | `step.reroll(n=2, credit="subgroup")` | 新沙盒重放前几步，策略接着跑，测试打分；新轨迹也参与训练（可以多处，`credit` 见[进阶用法](#进阶用法)） |
 | ……并给这几次一句提示 | `step.reroll(n=2, credit="verified", hint="Re-read the task.")` | 在这一步之前把提示给策略看：属于 prompt，不训练 |
 
-被上下文总结切开的轨迹（`traj.split`）不能分支：调 `reroll` 前先判断。
+被上下文总结切开的轨迹不能分支，所以调 `reroll` 前请先看一下 `traj.split`。
 
 ### 辅助功能
 
@@ -159,7 +159,7 @@ Reweight、Rewrite、Reroll 三层都能在完整训练里跑通；教师的改�
 
 ## 快速开始
 
-需要：一个 4 卡节点（每张 ≥ 90 GB，内存 ≥ 768 GB），装有 Apptainer 或 SingularityCE；一个兼容 E2B 的沙盒服务，和它拉镜像用的容器 registry；判官用的 OpenAI 兼容接口；第 4–5 步要一台有 Docker 的 linux/amd64 机器（可以就是集群）。细节见 [`docs/setup.md`](docs/setup.md)。
+你需要：一个 4 卡节点（每张 ≥ 90 GB，内存 ≥ 768 GB），装有 Apptainer 或 SingularityCE；一个兼容 E2B 的沙盒服务，和它拉镜像用的容器 registry；判官用的 OpenAI 兼容接口；第 4–5 步要一台有 Docker 的 linux/amd64 机器（可以就是集群）。细节见 [`docs/setup.md`](docs/setup.md)。
 
 **1. 拿代码**：在集群上、计算节点能写的目录里：
 
@@ -167,7 +167,7 @@ Reweight、Rewrite、Reroll 三层都能在完整训练里跑通；教师的改�
 git clone https://github.com/TokenWave-AI/PRL.git && cd PRL
 ```
 
-**2. 写站点配置**：复制示例，填好最上面一段（调度器和队列、工作目录 `PRL_EXT`、沙盒服务、registry、判官）。用 SingularityCE 而不是 Apptainer，或者机器上 Python < 3.10：再把 "Only for some sites" 一段对应的行取消注释。
+**2. 写站点配置**：复制示例，填好最上面一段（调度器和队列、工作目录 `PRL_EXT`、沙盒服务、registry、判官）。如果集群用的是 SingularityCE 而不是 Apptainer，或者机器上的 Python < 3.10，请再把 "Only for some sites" 一段里对应的行取消注释。
 
 ```bash
 cp configs/sites/example.env configs/sites/mysite.env      # mysite 可以随便取名；然后编辑这个文件
@@ -197,7 +197,7 @@ sudo docker login <registry>
 PRL_SITE=mysite PRL_SANDBOX_SMOKE_ONLY=1 bash scripts/setup/build_sandboxes.sh
 ```
 
-Docker 不在集群上时：在那台机器上也做第 1–4 步，用同一份 `configs/sites/mysite.env`（git 不管它，要自己复制过去），`PRL_EXT` 设成那台机器上的目录；第 5 步做完后把结果拷到集群：`rsync -a <那台机器的 PRL_EXT>/task_snapshots <集群>:/path/to/work/`（[`docs/setup.md`](docs/setup.md#site-specifics)）。
+如果 Docker 不在集群上，请在那台机器上也做第 1–4 步，用同一份 `configs/sites/mysite.env`（git 不管它，要自己复制过去），`PRL_EXT` 设成那台机器上的目录；第 5 步做完后把结果拷到集群：`rsync -a <那台机器的 PRL_EXT>/task_snapshots <集群>:/path/to/work/`（[`docs/setup.md`](docs/setup.md#site-specifics)）。
 
 **6. 运行**，在集群的登录节点上。只建了 8 个沙盒时，它在这 8 个任务上试 signed ATLAS（2 次更新，约 30 分钟；作业申请 2 小时）；第一个作业还会拉容器镜像、下载任务和权重、检查这 8 个沙盒。命令会打印日志在哪里。
 
@@ -205,7 +205,7 @@ Docker 不在集群上时：在那台机器上也做第 1–4 步，用同一份
 PRL_SITE=mysite bash scripts/quickstart.sh
 ```
 
-前面加 `DRY_RUN=1` 只打印调度器命令、不提交；队列太挤：加 `QUEUE=<队列>`（短的 debug 队列再加 `ELAPSE=01:00:00`）。
+前面加 `DRY_RUN=1` 时只打印调度器命令、不提交。队列比较挤的话，可以用 `QUEUE=<队列>` 换一个队列（短的 debug 队列请再加 `ELAPSE=01:00:00`）。
 
 **7. 看第一次更新**，在这次运行的 `train.log` 里（第 6 步打印的路径）：
 
@@ -224,7 +224,7 @@ PRL_SITE=mysite bash scripts/quickstart.sh                 # 在集群上，同�
 
 - 换 transform：`TRANSFORM=atlas`（`transforms/` 里的任意一个，包括你自己写的，见下）；默认是 signed ATLAS，结果表里的 58.09%，判官用它的 arm 设的 reasoning effort low（`PRL_JUDGE_EXTRA_BODY`；58.09% 那次用的是 gpt-6.1-sol）。
 - 改参数：`PRL_TRANSFORM_ARGS='{"other_weight": 0.3}'`；换算法：`ALGO=reinforce_plus_plus`（`ALGO=ppo` 要先跑它自己的烟测，见 [`CONTRIBUTING.md`](CONTRIBUTING.md)）；串联：`TRANSFORM=rewrite+atlas`（按顺序执行；用 `+` 不用逗号，因为提交命令按逗号切分变量），参数按名字给：`PRL_TRANSFORM_ARGS='{"atlas": {"other_weight": 0.3}}'`。
-- transform 对每条轨迹做了什么，`train.log` 里各有一行 `[prl] transform <名字> on <轨迹>: ok; steps changed: <如 5 weighted, 2 masked>; <保留>/<全部> trained tokens kept`（`[prl] step weights: ...` 每个训练 rank 一行，按样本计数，被上下文总结切开的轨迹算多个样本，而且只统计步骤权重，不含 mask；它最后一项 `with subgroup advantage spans` 是从分支点起和 reroll 兄弟比较打分的原轨迹数：`verified` 只算被分支超过的那些）。轨迹的通过率是 `rollout/episode_raw_reward`；`rollout/raw_reward_unfiltered` 按样本算（分支、被切开轨迹的各段都算）。TB-dev 分数是评测那份 `train.log` 里的 `eval/heldout`；从 trial 算：`python3 scripts/tools/tbdev_score.py --samples 8 <评测的 harbor_trials>`（被沙盒服务弄失败的 trial 会再跑，最多再 2 次，`--samples` 把失败的那几次去掉；`PRL_EVAL_SANDBOX_RETRIES=0` 则像 TB-dev 自己的打分一样记 0，和这样的评测比用 `--drop-sandbox-failures`）。
+- 看哪里：每条轨迹在 run 的 `train.log` 里有一行 `[prl] transform <名字> on <轨迹>: ...`；轨迹的通过率是 `rollout/episode_raw_reward`，TB-dev 分数是评测 `train.log` 里的 `eval/heldout`。日志和用 trial 重新打分的详细说明见 [`docs/setup.md`](docs/setup.md#reading-a-run)。
 - 完整训练到时限被停掉的话，再运行同一条命令会接着跑。
 
 **写自己的 transform：写、试、训。**
@@ -244,7 +244,7 @@ def my_transform(traj, **params):
 - **参数**：函数的关键字参数就是运行时配置（`PRL_TRANSFORM_ARGS='{"other_weight": 0.3}'`）。
 - 要问模型时写成 `async def`，用 `await ask(...)`（`from prl.transforms import ask`）；不问模型就写普通函数。一条轨迹调用一次。
 
-**② 不用 GPU，先在录好的轨迹上试。** 仓库带了 8 条真实训练轨迹，你的函数会在上面跑一遍（包括问模型），每条的决定写到输出目录。需要 Python ≥ 3.10，在仓库根目录运行：
+**② 先在录好的轨迹上试（不需要 GPU）。** 仓库带了 8 条真实训练轨迹，这个检查会在上面运行你的函数（包括问模型），并把每个决定写进输出目录。用 Python ≥ 3.10，在仓库根目录：
 
 ```bash
 python3 -m venv .venv && . .venv/bin/activate && pip install -e '.[check]'
@@ -253,17 +253,15 @@ PRL_TRANSFORM=my_transform MODEL_HF_DIR=tokenizer \
 PRL_TRANSFORM_CHECK_OUT=/tmp/check python -m prl.transforms.check
 ```
 
-函数要问模型的话，用站点配置里的判官：先运行 `set -a; source configs/sites/mysite.env; set +a`（不在集群上运行时，在这之前 `export PRL_JUDGE_KEY_FILE=<本机的 key 文件>`）。快速开始默认训练的是 `PRL_TRANSFORM=atlas_signed PRL_TRANSFORM_ARGS='{"failed_good_weight": 0.0}'`。训练用的 arm 可能比站点配置多设几个判官参数（signed ATLAS：`PRL_JUDGE_EXTRA_BODY='{"reasoning_effort": "low"}'`），想用同样的设置检查就在这里也设上。输出目录要用空的：上一次检查的文件会留着。
+终端里每条轨迹一行，最后一行是 `passed`（否则是 `FAILED` 和原因）；输出目录里每条轨迹的 `transform.json` 记录了你的函数改了什么。函数要问模型的话，会用站点配置里的判官：请在下载完 tokenizer 之后运行 `set -a; source configs/sites/mysite.env; set +a`。输出的详细说明见 [`transforms/README.zh-CN.md`](transforms/README.zh-CN.md#离线检查一个函数)。
 
-- 终端里每条轨迹一行：`[transform check] <轨迹>: reward <分数>, <步数> steps, <状态>, steps changed: <如 5 weighted, 2 masked>, trained tokens <改前> -> <改后>, <秒数> s`，
-  状态是 `ok` 或 `skipped`（skipped 的行末尾写着原因；中间夹着框架自己的日志行 `[prl] transform ... trained tokens kept`，问判官时还有它的 HTTP 请求）。最后一行是 `passed` 为通过；出错时打印 `FAILED`、出错的轨迹和原因。
-- 输出目录里每条轨迹一个子目录：`transform.json` 是框架的记录（每个函数的状态和用时、你写进 `traj.record` 的内容、
-  改了哪些步骤，如 `weighted_steps` {步骤: 新权重}、可训练 token 改前 / 改后的数量），`transform_calls.json` 是每次 `ask` 的请求和回答（ATLAS 判官的在 `atlas_labels.json`）；`summary.json` 汇总全部 8 条。
-- 步骤列表从 0 数，和 `step.index` 一样；判官自己的编号（ATLAS 的 `critical`、`good` / `bad`、`atlas_labels.json`；`hint_reroll` 的 `step`）和它们的 prompt 一样从 1 数。
-- 录好的轨迹没有 rollout log prob（`surprisal` 看到的都是 0），也没有测试输出（`hint_reroll` 的判官看不到）：这类选择只在训练里看得出来。用自己的轨迹：`scripts/tools/make_transform_fixture.py` 从一次运行的 `traces/rollout_data/<update>.pt` 做 fixture，`PRL_TRANSFORM_FIXTURE=<它>` 就在它上面检查。
-- reroll 在这里只记录请求（`transform.json` 的 `reroll`：从哪些步分支、要重放哪些轮），分支在训练时才真正跑；训练时快速开始会自动选 reroll 需要的 arm。
+**③ 训练 + 评测：**
 
-**③ 训练 + 评测**：`PRL_SITE=mysite TRANSFORM=my_transform bash scripts/quickstart.sh`。它读你的文件判断要不要判官（`ask`、ATLAS 的 labeler）和 reroll arm（`.reroll(`）；判断错了就直接说：`PRL_NEEDS_JUDGE=0` 或 `1`，`ARM=ota_train_transform` 或 `ota_train_transform_reroll`。作业开头会先在录好的轨迹上试跑你的函数，函数报错、超时或全部跳过就不开训。
+```bash
+PRL_SITE=mysite TRANSFORM=my_transform bash scripts/quickstart.sh
+```
+
+quickstart 会读你的文件判断要不要判官（`ask`、ATLAS 的 labeler）和 reroll arm（`.reroll(`）；如果判断错了，可以手动指定：`PRL_NEEDS_JUDGE=0` 或 `1`，`ARM=ota_train_transform` 或 `ota_train_transform_reroll`。作业开头会先在录好的轨迹上试跑你的函数，函数报错、超时或全部跳过就不开训。
 
 ## 进阶用法
 
@@ -272,7 +270,7 @@ PRL_TRANSFORM_CHECK_OUT=/tmp/check python -m prl.transforms.check
 其余文字照常学。仍然只用 Reweight 这一层。
 
 **改文字（`rewrite.py`）**：教师把轨迹改好再学（`failures="fix"` 只修失败的，`r' = 1`）；`mask_new=True` 让
-教师写的文字只做上下文、不进 loss。用到 Rewrite 这一层。判断标准在 `transforms/rewrite_prompts/`，复制一份就能改。
+教师写的文字只做上下文、不进 loss。用到 Rewrite 这一层。判断标准在 `transforms/rewrite_prompts/`，想改的话可以复制一份再修改。
 
 **再试一次（分支）**：在任意函数里，选一步调用 `reroll`：
 
@@ -347,10 +345,10 @@ E2B（沙盒），LiteLLM（Harbor 调模型），以及 [ATLaS: Agent Tuning vi
 
 ## 许可
 
-PRL 以 [Apache License 2.0](LICENSE) 发布，与 Miles 相同。`third_party/` 里的上游代码沿用各自的许可。
+PRL 以 [Apache License 2.0](LICENSE) 发布，与 Miles 相同。
 
 <p align="center">
-  <a href="https://github.com/TokenWave-AI"><img src="assets/brand/logo-tokenwave.png" alt="TokenWave" height="28"></a>
+  <a href="https://tokenwave.ai/"><img src="assets/brand/logo-tokenwave.png" alt="TokenWave" height="28"></a>
   &nbsp;
   <a href="https://github.com/hiyouga/LlamaFactory"><img src="assets/brand/logo-llamafactory.png" alt="LlamaFactory" height="28"></a>
   &nbsp;

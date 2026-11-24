@@ -1,7 +1,7 @@
 <p align="right"><b>English</b> · <a href="README.zh-CN.md">中文</a></p>
 
 <p align="center">
-  <a href="https://github.com/TokenWave-AI"><img src="assets/brand/logo-tokenwave.png" alt="TokenWave" height="44"></a>
+  <a href="https://tokenwave.ai/"><img src="assets/brand/logo-tokenwave.png" alt="TokenWave" height="44"></a>
   &nbsp;&nbsp;
   <a href="https://github.com/hiyouga/LlamaFactory"><img src="assets/brand/logo-llamafactory.png" alt="LlamaFactory" height="44"></a>
   &nbsp;&nbsp;
@@ -105,7 +105,7 @@ This layer samples more: the policy continues from the step you pick in a fresh 
 | let the policy run n more times from this step | `step.reroll(n=2, credit="subgroup")` | replays the steps before it in new sandboxes, the policy continues, the tests grade; the new trajectories train too (several steps are allowed; `credit`: see [Going further](#going-further)) |
 | ... with a hint for those runs | `step.reroll(n=2, credit="verified", hint="Re-read the task.")` | shows the hint to the policy before the step: part of its prompt, never trained |
 
-Not for a trajectory the context summary split into parts (`traj.split`): check it before you call `reroll`.
+A trajectory that the context summary split into parts cannot be rerolled, so please check `traj.split` before calling `reroll`.
 
 ### Helpers
 
@@ -159,7 +159,7 @@ Reweight, Rewrite and Reroll all train end to end in a full run; how best to use
 
 ## Quick start
 
-You need: one node of 4 GPUs (≥ 90 GB each, ≥ 768 GB of RAM) with Apptainer or SingularityCE, an E2B-compatible sandbox service with a container registry it pulls from, an OpenAI-compatible endpoint for the judge, and a linux/amd64 machine with Docker for steps 4–5 (it may be the cluster). Details: [`docs/setup.md`](docs/setup.md).
+You will need: one node of 4 GPUs (≥ 90 GB each, ≥ 768 GB of RAM) with Apptainer or SingularityCE, an E2B-compatible sandbox service with a container registry it pulls from, an OpenAI-compatible endpoint for the judge, and a linux/amd64 machine with Docker for steps 4–5 (it may be the cluster). Details: [`docs/setup.md`](docs/setup.md).
 
 **1. Get the code** on the cluster, in a directory the compute nodes can write:
 
@@ -167,7 +167,7 @@ You need: one node of 4 GPUs (≥ 90 GB each, ≥ 768 GB of RAM) with Apptainer 
 git clone https://github.com/TokenWave-AI/PRL.git && cd PRL
 ```
 
-**2. Write your site profile**: copy the example, then fill in its first block (the scheduler and queue, a work directory `PRL_EXT`, the sandbox service, the registry, the judge). SingularityCE instead of Apptainer, or Python < 3.10 on the hosts: also uncomment its "Only for some sites".
+**2. Write your site profile**: copy the example, then fill in its first block (the scheduler and queue, a work directory `PRL_EXT`, the sandbox service, the registry, the judge). If your cluster uses SingularityCE instead of Apptainer, or has Python < 3.10 on the hosts, please also uncomment the settings under "Only for some sites".
 
 ```bash
 cp configs/sites/example.env configs/sites/mysite.env      # mysite: any name; then edit the file
@@ -197,7 +197,7 @@ sudo docker login <registry>
 PRL_SITE=mysite PRL_SANDBOX_SMOKE_ONLY=1 bash scripts/setup/build_sandboxes.sh
 ```
 
-Docker on another machine than the cluster: there too steps 1–4 with the same `configs/sites/mysite.env` (git ignores it: copy it) and `PRL_EXT` set to a directory of that machine, then copy what step 5 made to the cluster: `rsync -a <that PRL_EXT>/task_snapshots <cluster>:/path/to/work/` ([`docs/setup.md`](docs/setup.md#site-specifics)).
+If Docker is on another machine than the cluster, please repeat steps 1–4 there with the same `configs/sites/mysite.env` (git ignores it: copy it) and `PRL_EXT` set to a directory of that machine, then copy what step 5 made to the cluster: `rsync -a <that PRL_EXT>/task_snapshots <cluster>:/path/to/work/` ([`docs/setup.md`](docs/setup.md#site-specifics)).
 
 **6. Run** on the cluster's login node. With the 8 sandboxes it tries signed ATLAS on them (2 updates, about 30 min; the job asks for 2 h); the first job also pulls the container image, downloads the tasks and the weights and checks the 8 sandboxes. It prints where its logs are.
 
@@ -205,7 +205,7 @@ Docker on another machine than the cluster: there too steps 1–4 with the same 
 PRL_SITE=mysite bash scripts/quickstart.sh
 ```
 
-`DRY_RUN=1` in front prints the scheduler command and submits nothing; a busy queue: `QUEUE=<queue>` (a short debug queue: with `ELAPSE=01:00:00`).
+With `DRY_RUN=1` in front, it only prints the scheduler command. If the queue is busy, you can choose another with `QUEUE=<queue>` (for a short debug queue, add `ELAPSE=01:00:00`).
 
 **7. See the first update** in the run's `train.log` (the path step 6 printed):
 
@@ -224,7 +224,7 @@ PRL_SITE=mysite bash scripts/quickstart.sh                 # on the cluster, as 
 
 - Another transform: `TRANSFORM=atlas` (any of `transforms/`, yours too: below); the default is signed ATLAS, 58.09% in the results, with the judge at the reasoning effort low that its arm sets (`PRL_JUDGE_EXTRA_BODY`; the 58.09% run used gpt-6.1-sol).
 - Parameters: `PRL_TRANSFORM_ARGS='{"other_weight": 0.3}'`; algorithm: `ALGO=reinforce_plus_plus` (`ALGO=ppo` after its own smoke, [`CONTRIBUTING.md`](CONTRIBUTING.md)); chains: `TRANSFORM=rewrite+atlas` (run in order; `+`, not a comma, because the submit commands split variables on commas), with params per name: `PRL_TRANSFORM_ARGS='{"atlas": {"other_weight": 0.3}}'`.
-- What the transform did, a line per trajectory in `train.log`: `[prl] transform <name> on <trajectory>: ok; steps changed: <e.g. 5 weighted, 2 masked>; <kept>/<all> trained tokens kept` (`[prl] step weights: ...`, one line per training rank, counts samples, a trajectory split by the context summary being several, and step weights only, not masks; its last count, `with subgroup advantage spans`, the original trajectories scored against their reroll siblings from a branch point on: with `verified` only those a branch beat). The pass rate of the trajectories is `rollout/episode_raw_reward`; `rollout/raw_reward_unfiltered` counts samples (a branch, a split trajectory's parts). The TB-dev score is `eval/heldout` in the evaluation's `train.log`; from the trials: `python3 scripts/tools/tbdev_score.py --samples 8 <the eval's harbor_trials>` (a trial the sandbox service failed runs again, up to 2 more times, and `--samples` leaves the failed attempts out; `PRL_EVAL_SANDBOX_RETRIES=0` scores it 0 as TB-dev's own scoring does, and `--drop-sandbox-failures` compares with such an evaluation).
+- Where to look: each trajectory gets a line `[prl] transform <name> on <trajectory>: ...` in the run's `train.log`; the pass rate is `rollout/episode_raw_reward`, and the TB-dev score is `eval/heldout` in the evaluation's `train.log`. More on the logs and on scoring from the trials: [`docs/setup.md`](docs/setup.md#reading-a-run).
 - A full run stopped by its time limit goes on when the same command is run again.
 
 **Your own transform: write, try, train.**
@@ -244,7 +244,7 @@ def my_transform(traj, **params):
 - **Parameters**: the function's keyword arguments are its run-time settings (`PRL_TRANSFORM_ARGS='{"other_weight": 0.3}'`).
 - To ask a model, write `async def` and `await ask(...)` (`from prl.transforms import ask`); otherwise a plain function. It is called once per trajectory.
 
-**② Try it on recorded trajectories, no GPU.** The repo ships 8 real training trajectories; your function runs on them (model calls included) and each decision is written to the output directory. With Python ≥ 3.10, from the repository root:
+**② Try it on recorded trajectories (no GPU).** The repo ships 8 real training trajectories; this check runs your function on them, model calls included, and writes each decision to an output directory. With Python ≥ 3.10, from the repository root:
 
 ```bash
 python3 -m venv .venv && . .venv/bin/activate && pip install -e '.[check]'
@@ -253,17 +253,15 @@ PRL_TRANSFORM=my_transform MODEL_HF_DIR=tokenizer \
 PRL_TRANSFORM_CHECK_OUT=/tmp/check python -m prl.transforms.check
 ```
 
-A function that asks a model uses the judge of the site profile: `set -a; source configs/sites/mysite.env; set +a` first (on another machine than the cluster, `export PRL_JUDGE_KEY_FILE=<the key file here>` before it). What the quick start trains by default: `PRL_TRANSFORM=atlas_signed PRL_TRANSFORM_ARGS='{"failed_good_weight": 0.0}'`. The training arm may set more judge settings than the profile (signed ATLAS: `PRL_JUDGE_EXTRA_BODY='{"reasoning_effort": "low"}'`); set them here too to check with the same ones. Reuse an output directory only empty: files of an earlier check stay.
+It prints one line per trajectory and ends with `passed` (or `FAILED` and the reason); `transform.json` in each trajectory's output directory records what your function changed. If your function calls a model, it uses the judge of your site profile: please run `set -a; source configs/sites/mysite.env; set +a` after the download. More on the output: [`transforms/README.md`](transforms/README.md#checking-a-function-offline).
 
-- The terminal shows one line per trajectory: `[transform check] <trajectory>: reward <reward>, <steps> steps, <status>, steps changed: <e.g. 5 weighted, 2 masked>, trained tokens <before> -> <after>, <seconds> s`,
-  where the status is `ok` or `skipped` (a skipped line ends with the reason; between them the framework's own lines, `[prl] transform ... trained tokens kept`, and with a judge its HTTP requests). A last line `passed` means it passed; otherwise it prints `FAILED`, the trajectory and the reason.
-- The output directory has one subdirectory per trajectory: `transform.json` is the framework's record (each function's status and time, what you wrote into `traj.record`,
-  the steps it changed, e.g. `weighted_steps` {step: new weight}, the trainable tokens before / after) and `transform_calls.json` every `ask` request and answer (the ATLAS judge's: `atlas_labels.json`); `summary.json` sums up all 8.
-- The step lists count from 0, as `step.index`; the judges' own numbers (ATLAS' `critical`, `good` / `bad`, `atlas_labels.json`; `hint_reroll`'s `step`) from 1, as in their prompts.
-- The recorded trajectories have no rollout log probs (`surprisal` sees all 0) and no test output (`hint_reroll`'s judge sees none): such choices show in training only. Your own trajectories: `scripts/tools/make_transform_fixture.py` makes a fixture from a run's `traces/rollout_data/<update>.pt`, `PRL_TRANSFORM_FIXTURE=<it>` checks on it.
-- A reroll is only recorded here (`reroll` in `transform.json`: the steps and the turns to replay); its branches run in training, where the quick start picks the arm a reroll needs by itself.
+**③ Train and evaluate it:**
 
-**③ Train and evaluate it**: `PRL_SITE=mysite TRANSFORM=my_transform bash scripts/quickstart.sh`. It reads your file to tell whether it needs the judge (`ask`, ATLAS' labeler) and the reroll arm (`.reroll(`); when that guesses wrong, say it: `PRL_NEEDS_JUDGE=0` or `1`, `ARM=ota_train_transform` or `ota_train_transform_reroll`. The job first runs your function on the recorded trajectories and does not start training if it raises, times out or skips them all.
+```bash
+PRL_SITE=mysite TRANSFORM=my_transform bash scripts/quickstart.sh
+```
+
+The quick start reads your file to tell whether it needs the judge (`ask`, ATLAS' labeler) and the reroll arm (`.reroll(`); if it guesses wrong, you can set `PRL_NEEDS_JUDGE=0` or `1`, and `ARM=ota_train_transform` or `ota_train_transform_reroll`. Before training, the job runs your function on the recorded trajectories once more and stops if it raises, times out or skips them all.
 
 ## Going further
 
@@ -272,7 +270,7 @@ and is pushed the other way. With `quote_bad=True` the judge must also quote the
 trains as usual. Still only the Reweight layer.
 
 **Text (`rewrite.py`)**: a teacher improves the trajectory before it trains (`failures="fix"` fixes only failures, `r' = 1`); `mask_new=True` keeps
-the teacher's text as context only, out of the loss. This uses the Rewrite layer. The criteria are in `transforms/rewrite_prompts/`; copy one to change it.
+the teacher's text as context only, out of the loss. This uses the Rewrite layer. The criteria are in `transforms/rewrite_prompts/`; to change them, copy one and edit the copy.
 
 **Trying again (branches)**: in any function, pick a step and call `reroll`:
 
@@ -347,10 +345,10 @@ E2B (sandboxes), LiteLLM (Harbor's model calls), and [ATLaS: Agent Tuning via Le
 
 ## License
 
-PRL is released under the [Apache License 2.0](LICENSE), as Miles is. The upstream code vendored in `third_party/` keeps its own license.
+PRL is released under the [Apache License 2.0](LICENSE), as Miles is.
 
 <p align="center">
-  <a href="https://github.com/TokenWave-AI"><img src="assets/brand/logo-tokenwave.png" alt="TokenWave" height="28"></a>
+  <a href="https://tokenwave.ai/"><img src="assets/brand/logo-tokenwave.png" alt="TokenWave" height="28"></a>
   &nbsp;
   <a href="https://github.com/hiyouga/LlamaFactory"><img src="assets/brand/logo-llamafactory.png" alt="LlamaFactory" height="28"></a>
   &nbsp;

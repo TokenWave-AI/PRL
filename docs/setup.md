@@ -55,6 +55,16 @@ dependencies, the tasks (728 training + 70 TB-dev), the weights and their Megatr
   `download` (weights), `convert` (Megatron checkpoint), joined by `+`; measured on GB200: image pull ~10 min, the rest of
   `prepare` ~2 min, `convert` ~2 min; then the smoke reaches its first update in ~15-20 min.
 
+## Reading a run
+
+- Each trajectory gets a line in the run's `train.log`: `[prl] transform <name> on <trajectory>: ok; steps changed: <e.g. 5 weighted, 2 masked>; <kept>/<all> trained tokens kept`.
+  `[prl] step weights: ...` (one line per training rank) counts samples, a trajectory split by the context summary being several, and step weights only, not masks; its last count,
+  `with subgroup advantage spans`, is the original trajectories scored against their reroll siblings from a branch point on (with `verified`, only those a branch beat).
+- The pass rate of the trajectories is `rollout/episode_raw_reward`; `rollout/raw_reward_unfiltered` counts samples (a branch, a split trajectory's parts).
+- The TB-dev score is `eval/heldout` in the evaluation's `train.log`. From the trials: `python3 scripts/tools/tbdev_score.py --samples 8 <the eval's harbor_trials>`.
+  A trial that the sandbox service failed runs again, up to 2 more times, and `--samples` leaves the failed attempts out; `PRL_EVAL_SANDBOX_RETRIES=0` scores such a trial 0, as
+  TB-dev's own scoring does, and `--drop-sandbox-failures` compares with such an evaluation.
+
 ## Site specifics
 
 - Put the repository where the compute nodes can write: every job applies `patches/` to `third_party/` into `build/`
