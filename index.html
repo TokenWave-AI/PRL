@@ -242,6 +242,7 @@
 .cite-block{display:grid;grid-template-columns:340px minmax(0,1fr);gap:72px;align-items:start;margin-top:48px;padding-top:32px;border-top:1px solid var(--line)}
 .cite-block h3{font-size:24px;line-height:32px;margin-top:12px}.cite-block p:not(.eyebrow){margin-top:12px;color:#585D67;font-size:13px;line-height:22px}
 .cite-block .code-window pre{white-space:pre;color:#C5DDFF}
+.cite-block p.cite-authors{color:var(--ink);font-size:13px;line-height:22px}
 @media(max-width:680px){.cite-block{grid-template-columns:1fr;gap:20px;margin-top:32px;padding-top:24px}.cite-block h3{font-size:20px;line-height:28px}}
 </style>
 </head>
@@ -344,9 +345,12 @@ Run an experiment.</h2><p data-field="startBody">Start with the 8 recorded train
       <section class="closing-section"><div class="wrap"><p class="eyebrow">PROGRAM WHAT COMES NEXT.</p><h2 data-field="closing">Your next idea.
 Your next transform.</h2><a href="#resources" class="button solid">Explore PRL <span aria-hidden="true">↗</span></a><span class="closing-symbol" aria-hidden="true">{&nbsp;}</span></div></section>
 
-      <section id="resources" class="resources-section section wrap" aria-labelledby="resources-title"><div class="resources-heading"><div><p class="eyebrow">RESOURCES</p><h2 id="resources-title" data-field="resourcesTitle">Explore PRL</h2></div><p data-field="resourcesBody">Continue with the code, interfaces, and examples.</p></div><div id="resource-grid" class="resource-grid"></div><div class="cite-block" id="cite"><div><p class="eyebrow">CITE</p><h3 data-field="citeTitle">Cite PRL</h3><p data-field="citeBody">If PRL helps your work, please cite it. If you use the atlas or atlas_signed transforms, please also cite &quot;ATLaS: Agent Tuning via Learning Critical Steps&quot; (Chen et al., ACL 2025, arXiv:2503.02197); both BibTeX entries are in the README.</p></div><div class="code-window"><div class="code-titlebar"><span><i aria-hidden="true"></i>BibTeX</span><button class="copy-button" data-copy="cite">Copy BibTeX <span aria-hidden="true">⧉</span></button></div><pre><code data-field="citeBibtex">@misc{prl2026,
+      <section id="resources" class="resources-section section wrap" aria-labelledby="resources-title"><div class="resources-heading"><div><p class="eyebrow">RESOURCES</p><h2 id="resources-title" data-field="resourcesTitle">Explore PRL</h2></div><p data-field="resourcesBody">Continue with the code, interfaces, and examples.</p></div><div id="resource-grid" class="resource-grid"></div><div class="cite-block" id="cite"><div><p class="eyebrow">CITE</p><h3 data-field="citeTitle">Cite PRL</h3><p class="cite-authors" data-field="citeAuthors">Kefan Yu*, Jiarui Liu*, Qingcheng Zeng, Yaqian Wang, Heli Qi, Enduo Zhao, Stephen Huang, Eli Cheung, Qian Liu, Yaowei Zheng, Chenyang Zhao, Weihao Xuan (* equal contribution)</p><p data-field="citeBody">If PRL helps your work, please cite it. If you use the atlas or atlas_signed transforms, please also cite &quot;ATLaS: Agent Tuning via Learning Critical Steps&quot; (Chen et al., ACL 2025, arXiv:2503.02197); both BibTeX entries are in the README.</p></div><div class="code-window"><div class="code-titlebar"><span><i aria-hidden="true"></i>BibTeX</span><button class="copy-button" data-copy="cite">Copy BibTeX <span aria-hidden="true">⧉</span></button></div><pre><code data-field="citeBibtex">@misc{prl2026,
   title        = {{PRL}: Programmable Reinforcement Learning for Agents},
-  author       = {{TokenWave AI}},
+  author       = {Yu, Kefan and Liu, Jiarui and Zeng, Qingcheng and
+                  Wang, Yaqian and Qi, Heli and Zhao, Enduo and
+                  Huang, Stephen and Cheung, Eli and Liu, Qian and
+                  Zheng, Yaowei and Zhao, Chenyang and Xuan, Weihao},
   year         = {2026},
   howpublished = {\url{https://github.com/TokenWave-AI/PRL}}
 }</code></pre></div></div></section>
@@ -416,8 +420,9 @@ Your next transform.</h2><a href="#resources" class="button solid">Explore PRL <
     "resource3Body": "Start with ATLAS, rewrite, and the branch template.",
     "acknowledgement": "Built on Miles · slime · SGLang · Megatron-LM · Harbor / Terminus-2 · E2B · LiteLLM. ATLAS follows \"ATLaS: Agent Tuning via Learning Critical Steps\" (Chen et al., ACL 2025, arXiv:2503.02197).",
     "citeTitle": "Cite PRL",
+    "citeAuthors": "Kefan Yu*, Jiarui Liu*, Qingcheng Zeng, Yaqian Wang, Heli Qi, Enduo Zhao, Stephen Huang, Eli Cheung, Qian Liu, Yaowei Zheng, Chenyang Zhao, Weihao Xuan (* equal contribution)",
     "citeBody": "If PRL helps your work, please cite it. If you use the atlas or atlas_signed transforms, please also cite \"ATLaS: Agent Tuning via Learning Critical Steps\" (Chen et al., ACL 2025, arXiv:2503.02197); both BibTeX entries are in the README.",
-    "citeBibtex": "@misc{prl2026,\n  title        = {{PRL}: Programmable Reinforcement Learning for Agents},\n  author       = {{TokenWave AI}},\n  year         = {2026},\n  howpublished = {\\url{https://github.com/TokenWave-AI/PRL}}\n}"
+    "citeBibtex": "@misc{prl2026,\n  title        = {{PRL}: Programmable Reinforcement Learning for Agents},\n  author       = {Yu, Kefan and Liu, Jiarui and Zeng, Qingcheng and\n                  Wang, Yaqian and Qi, Heli and Zhao, Enduo and\n                  Huang, Stephen and Cheung, Eli and Liu, Qian and\n                  Zheng, Yaowei and Zhao, Chenyang and Xuan, Weihao},\n  year         = {2026},\n  howpublished = {\\url{https://github.com/TokenWave-AI/PRL}}\n}"
   },
   "model": "Qwen3.5-9B",
   "trainDataset": "OpenThoughts-Agent-v1-RL",
@@ -754,7 +759,7 @@ Your next transform.</h2><a href="#resources" class="button solid">Explore PRL <
       `> ${p('closing')}`,
       `## ${p('resourcesTitle')}`, t.resourcesBody,
       data.resources.map(r => r.url ? `- [${t[r.titleKey]}](${r.url.replace(/\(/g, '%28').replace(/\)/g, '%29')}): ${t[r.bodyKey]}` : `- **${t[r.titleKey]}**: Link coming soon. ${t[r.bodyKey]}`).join('\n'),
-      `## ${p('citeTitle')}`, t.citeBody, code(t.citeBibtex, 'bibtex'),
+      `## ${p('citeTitle')}`, t.citeAuthors, t.citeBody, code(t.citeBibtex, 'bibtex'),
       '---', t.acknowledgement
     ];
     return `${parts.join('\n\n')}\n`;
