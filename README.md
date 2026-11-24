@@ -314,7 +314,7 @@ What each option means: [`transforms/README.md`](transforms/README.md#3-branch-t
 
 **Authors:** Kefan Yu\*, Jiarui Liu\*, Qingcheng Zeng, Yaqian Wang, Heli Qi, Enduo Zhao, Stephen Huang, Eli Cheung, Qian Liu, Yaowei Zheng, Chenyang Zhao, Weihao Xuan (\* equal contribution)
 
-If you use PRL, please cite it (GitHub's "Cite this repository" button reads the same record from [`CITATION.cff`](CITATION.cff)):
+If you find this repository useful, please cite:
 
 ```bibtex
 @misc{prl2026,

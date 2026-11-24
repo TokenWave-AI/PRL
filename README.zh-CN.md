@@ -314,7 +314,7 @@ TRANSFORM=branch PRL_TRANSFORM_ARGS='{
 
 **作者：** Kefan Yu\*, Jiarui Liu\*, Qingcheng Zeng, Yaqian Wang, Heli Qi, Enduo Zhao, Stephen Huang, Eli Cheung, Qian Liu, Yaowei Zheng, Chenyang Zhao, Weihao Xuan（\* 共同第一作者）
 
-如果用到 PRL，请引用（GitHub 上的 "Cite this repository" 按钮读的是 [`CITATION.cff`](CITATION.cff) 里的同一份信息）：
+如果觉得这个仓库有用，欢迎引用：
 
 ```bibtex
 @misc{prl2026,
